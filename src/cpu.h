@@ -8,6 +8,13 @@ class CPU {
     void update_timers();
     uint16_t fetch();
     void decode_and_execute(uint16_t);
+
+    uint8_t read(uint16_t addr) const;
+
+		//put hex mem addr and the opcode to store into address
+		void write(uint16_t addr, uint8_t value) { 
+			CPU_memory[addr] = value; 
+		}
   private:
 
     // Accumulator. supports using status register for carrying and overflow detection
@@ -43,10 +50,34 @@ class CPU {
       The B flag and 1 do nothing
      */
     uint8_t P;
-      
 
-
-
-
+    // The total memory for the cpu is 64K bytes
+    // Only the first 2k Bytes is ram Memory, but the rest
+    // are for other functionality. 0x2000 - 0x3FFF are separate memory
+    // locations for the ppu and require calling another function.
+    uint8_t CPU_memory[65536];
 
 };
+
+/*
+===================================
+ NES CPU Memory Map (Summary)
+===================================
+
+$0000–$07FF : 2KB internal RAM (2048 bytes)
+$0800–$0FFF : Mirror of $0000–$07FF  
+$1000–$17FF : Mirror of $0000–$07FF  
+$1800–$1FFF : Mirror of $0000–$07FF  
+
+$2000–$2007 : PPU registers  
+$2008–$3FFF : Mirrors of $2000–$2007 (every 8 bytes)  
+
+$4000–$4017 : APU and I/O registers  
+$4018–$401F : Normally disabled APU and I/O functions (used in test mode)  
+
+$4020–$5FFF : Open bus / cartridge expansion  
+
+$6000–$7FFF : Cartridge RAM (if present)  
+$8000–$FFFF : Cartridge ROM / Mapper registers  
+
+*/
