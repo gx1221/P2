@@ -2,6 +2,8 @@
   "files.associations": {
     "iostream": "cpp",
     "istream": "cpp",
-    "vector": "cpp"
+    "vector": "cpp",
+    "coroutine": "cpp",
+    "xmemory": "cpp"
   }
 }

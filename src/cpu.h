@@ -222,6 +222,7 @@ class CPU {
     uint8_t A; // 0x0 in constructor
 
     //Program counter
+    // 16 bits because it reads both the opcode (8 bits) and argument (8 bits)
     uint16_t PC; 
 
     // X and Y indexes. Loop counters
@@ -307,11 +308,15 @@ or more bytes, read the value backwards.
 
 Immediate: literally just use the direct 8-bit (1 byte) value that comes after the opcode
 Example: LDX #$FF -> X now contains FF
+  uint8_t value = read(PC);
+  PC++;
+
 
 Zero Page: Take the 8-bit (1 byte) value, and use it as an index in the memory, then take the value 
 that came from the memory location for use
 Example: LDX #$FF -> read memory at 0x00FF and store value read into X
 val = PEEK((arg % 256); you can also do (& 0xFF) instead 
+
 
 
 Absolute: Get the next 16-bit (2 bytes) value and use it as an index.
@@ -351,7 +356,7 @@ Example: LDA $20 ->
          read(addr)
 
 
-THERE EXISTS NO INDIRECT INDEXED X [(d), X], ONLY Y
+THERE EXISTS NO INDIRECT INDEXED X [(d), X], ONLY  indirect indexed Y
 
 Indirect Indexed (d), Y: Take the 8-bit value, and zero page it. After that
 you read the value at the zero-paged byte and then read another byte at the address after that one.

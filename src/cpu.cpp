@@ -98,6 +98,17 @@ void CPU::illegal_instruction() {
     bad_instruction = true; //
 }
   
+
+/*
+ *  ADC:  Add with Carry
+ *  Add memory flag and carry value to accumulator
+ *  C - Carry 	result > $FF 	(If the result overflowed past $FF (wrapping around), unsigned overflow occurred.)
+ *  Z - Zero 	result == 0 	
+ *  V - Overflow 	(result ^ A) & (result ^ memory) & $80 	(If the result's sign is different from both A's and memory's, signed overflow (or underflow) occurred.)
+ *  N - Negative 	result bit 7
+ */
+
+
 void CPU::adc_immediate() {
   uint8_t value = read(PC);
   PC++;
@@ -241,13 +252,256 @@ void CPU::adc_absolute_y() {
 }
 
 void CPU::adc_indexed_indirect() {
-  uint8_t value = read(PC);
+  uint8_t initial_val = read(PC); //get initial value/address
   PC++;
 
-  
+  uint8_t low = read((initial_val + X) & 0xFF);  //take the initial value, add X, then zero page
+  uint8_t high = read((initial_val + X + 1) & 0xFF); //get the same thing, but go up 1 to next address
+
+  uint16_t addr = high << 8 | low; //combine
+
+  uint8_t value = read(addr);
+
+  uint16_t result = A + value + ((P & FLAG_CARRY)? 1 : 0);
+  set_flag(FLAG_CARRY, result > 0xFF);
+  set_flag(FLAG_OVERFLOW, ((result ^ A) & (result ^ value) & 0x80)); 
+
+  A = result & 0xFF;
+
+  set_flag(FLAG_ZERO, A == 0);
+  set_flag(FLAG_NEGATIVE, A & 0x80);
+
+  cycles += 6;
 }
 
 void CPU::adc_indirect_indexed() {
+  uint8_t initial_val = read(PC); //take initial value
+  PC++;
 
+  uint8_t low = read(initial_val & 0xFF); //get the zero paged value
+  uint8_t high = read((initial_val + 1) & 0xFF); //get the next value and then zero page it
+  
+  uint16_t init_addr = (high << 8 | low); //combine bytes
+
+  uint16_t addr = (init_addr + Y); // Add Y to the address for this addressing mode
+
+  if ((init_addr & 0xFF00) != (addr & 0xFF00)) { //check if first byte changed
+    cycles += 1;
+  }
+
+  uint8_t value = read(addr);
+  uint16_t result = A + value + ((P & FLAG_CARRY)? 1 : 0);
+  
+  
+  set_flag(FLAG_CARRY, result > 0xFF);
+  set_flag(FLAG_OVERFLOW, ((result ^ A) & (result ^ value) & 0x80)); 
+
+  A = result & 0xFF;
+
+  set_flag(FLAG_ZERO, A == 0);
+  set_flag(FLAG_NEGATIVE, A & 0x80);
+
+  cycles += 5;
+}
+
+
+
+
+/*
+ *  AND: Bitwise AND
+ *  A = A & memory. (This ANDs a memory value and the accumulator)
+ * 
+ *  Z - Zero 	result == 0
+ *  N - Negative  result bit 7 
+ */
+
+
+
+
+
+
+void CPU::and_immediate() {
+  uint8_t value = read(PC);
+  PC++;
+
+  A = (A & value) & 0xFF; // Performing the and with value and accumulator
+  // still zero-paging just in case even if redundant
+
+  set_flag(FLAG_ZERO, A == 0);
+  set_flag(FLAG_NEGATIVE, A & 0x80);
+  cycles += 2;
+} 
+
+void CPU::and_zeropage() {
+  uint8_t base_addr = read(PC);
+  PC++;
+  
+  uint8_t value = read(base_addr);
+  A = (A & value) & 0xFF; 
+  set_flag(FLAG_ZERO, A == 0);
+  set_flag(FLAG_NEGATIVE, A & 0x80);
+  cycles += 3;
+}
+
+
+void CPU::and_zeropage_x() {
+  uint8_t base_addr = read(PC);
+  uint8_t value = (base_addr + X);
+
+  A = (A & value) & 0xFF;
+  set_flag(FLAG_ZERO, A == 0);
+  set_flag(FLAG_NEGATIVE, A & 0x80);
+  cycles += 4;
+}
+
+void CPU::and_absolute() {
+  uint8_t low = read(PC + 1);
+  uint8_t high = read(PC + 2);
+  
+  uint16_t addr = (high << 8) | low;
+  uint8_t value = read(addr);
+
+  A = (A & value) & 0xFF;
+  set_flag(FLAG_ZERO, A == 0);
+  set_flag(FLAG_NEGATIVE, A & 0x80);
+  cycles += 4;
+};
+
+void CPU::and_absolute_x() {
+
+  uint8_t low = read(PC + 1); //read two bytes on pc
+  uint8_t high = read(PC + 2); 
+
+  PC += 2;
+
+  uint16_t addr = (high << 8) | low; 
+
+  // Page cross
+  if ((addr & 0xFF00) != ((addr + X) & 0xFF00)) { //checking if first byte is the same as original after adding
+    cycles += 1; 
+  }
+
+  uint8_t value = read(addr + X); // Add value in x register to current value and read
+  A = (A & value) & 0xFF; // AND value, to accumulator, then set to 
+  
+
+  set_flag(FLAG_ZERO, A == 0);
+  set_flag(FLAG_NEGATIVE, A & 0x80);
+  cycles += 4;
 
 }
+
+void CPU::and_absolute_y() {
+  uint8_t low = read(PC + 1); //read two bytes on pc
+  uint8_t high = read(PC + 2); 
+
+  PC += 2;
+
+  uint16_t addr = (high << 8) | low; 
+
+  // Page cross
+  if ((addr & 0xFF00) != ((addr + Y) & 0xFF00)) { //checking if first byte is the same as original after adding
+    cycles += 1; 
+  }
+
+  uint8_t value = read(addr + Y); // Add value in x register to current value and read
+  A = (A & value) & 0xFF; // AND value, to accumulator, then set to 
+
+
+  set_flag(FLAG_ZERO, A == 0);
+  set_flag(FLAG_NEGATIVE, A & 0x80);
+  cycles += 4;
+
+}
+
+void CPU::and_indexed_indirect() {
+  uint8_t initial_val = read(PC); //get initial value from PC
+  PC++;
+
+  uint8_t low = read((initial_val + X) & 0xFF); //add X to value and zero page
+  uint8_t high = read((initial_val + X + 1) & 0xFF); //get add + X + 1 and zero page to get second byte
+
+  uint16_t addr = high << 8 | low;
+
+  uint8_t value = read(addr);
+
+  A = (A & value) & 0xFF;
+
+  set_flag(FLAG_ZERO, A == 0);
+  set_flag(FLAG_NEGATIVE, A & 0x80);
+  cycles += 6;
+
+}
+
+void CPU::and_indirect_indexed() {
+  uint8_t initial_val = read(PC);
+  PC++;
+
+  uint8_t low = read(initial_val & 0xFF); //get zero paged address
+  uint8_t high = read((initial_val + 1) & 0xFF); //get next address and zero page
+  
+  uint16_t init_addr = (high << 8 | low);
+  uint16_t addr = (init_addr + Y); // add Y for this mode
+
+  if ((init_addr & 0xFF00) != (addr & 0xFF00)) { //check if intial address has the same first byte as new address
+    cycles += 1;
+  }
+
+  uint8_t value = read(addr);
+
+  A = (A & value) & 0xFF;
+
+  set_flag(FLAG_ZERO, A == 0);
+  set_flag(FLAG_NEGATIVE, A & 0x80);
+  cycles += 5;
+}
+
+
+
+
+/*
+ * ASL: Arithmetic Shift Left
+ * value = value << 1 (ASL shifts all of the bits of a memory value or the accumulator one position to the left)
+ * 
+ * C - Carry 	value bit 7
+ * Z - Zero 	result == 0
+ * N - Negative 	result bit 7 
+ *
+ */
+
+
+
+void CPU::asl_accumulator() {
+  uint8_t carried_bit = (A >> 7); // get first bit/ bit-7 for carry flag
+  A <<= 1; // just left shift by 1
+  
+
+  set_flag(FLAG_CARRY, carried_bit);
+  set_flag(FLAG_ZERO, A == 0);
+  set_flag(FLAG_NEGATIVE, (A & 0x80));
+
+  cycles += 2;
+}
+
+
+void CPU::asl_zeropage() {
+  uint8_t address = read(PC);
+  PC++;
+
+  uint8_t value = read(address);
+  uint8_t carried_bit = (value >> 7);
+
+  value <<= 1;
+
+  write(address, value);
+
+  set_flag(FLAG_CARRY, carried_bit);
+  set_flag(FLAG_ZERO, A == 0);
+  set_flag(FLAG_NEGATIVE, (A & 0x80));
+  
+  cycles += 5;
+
+}
+void CPU::asl_zeropage_x();
+void CPU::asl_absolute();
+void CPU::asl_absolute_x();
