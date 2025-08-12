@@ -111,6 +111,7 @@ void CPU::illegal_instruction() {
     printf("Illegal opcode 0x%02X at PC=0x%04X\n", read(PC - 1), PC - 1); // Tracking opcode and location
     bad_instruction = true; //
 }
+
   
 
 /*
@@ -165,9 +166,9 @@ void CPU::adc_zeropage() {
 }
 
   void CPU::adc_zeropage_x() {
-    uint8_t base_addr = read(PC);
+    uint8_t base_address = read(PC);
     PC++;
-    uint8_t address = (base_addr + X) & 0xFF; // zero page so mask it with first 256 bit. 
+    uint8_t address = (base_address + X) & 0xFF; // zero page so mask it with first 256 bit. 
     uint8_t value = read(address);
 
     uint16_t result = A + value + ((P & FLAG_CARRY)? 1 : 0); // if C flag is on, add 1, else nothing
@@ -347,10 +348,10 @@ void CPU::and_immediate() {
 } 
 
 void CPU::and_zeropage() {
-  uint8_t base_addr = read(PC);
+  uint8_t base_address = read(PC);
   PC++;
   
-  uint8_t value = read(base_addr);
+  uint8_t value = read(base_address);
   A = (A & value) & 0xFF; 
   set_flag(FLAG_ZERO, A == 0);
   set_flag(FLAG_NEGATIVE, A & 0x80);
@@ -359,8 +360,8 @@ void CPU::and_zeropage() {
 
 
 void CPU::and_zeropage_x() {
-  uint8_t base_addr = read(PC);
-  uint8_t value = (base_addr + X);
+  uint8_t base_address = read(PC);
+  uint8_t value = (base_address + X);
 
   A = (A & value) & 0xFF;
   set_flag(FLAG_ZERO, A == 0);
@@ -517,10 +518,10 @@ void CPU::asl_zeropage() {
 
 }
 void CPU::asl_zeropage_x() {
-  uint8_t init_address = read(PC); //get inital address
+  uint8_t base_address = read(PC); //get initial address
   PC++;
 
-  uint8_t address = (init_address + X) & 0xFF; //add x to address then zero page
+  uint8_t address = (base_address + X) & 0xFF; //add x to address then zero page
   uint8_t value = read(address);
   
   uint8_t carried_bit = (value >> 7);
@@ -896,11 +897,520 @@ void CPU::bvs_relative() {
 }
 
 
+/*
+ * CLC - Clear Carry
+ * Clear the carry flag
+ * 
+ * C = 0
+ */
+void CPU::clc_implied() {
+  set_flag(FLAG_CARRY, false);
+  cycles +=2;
+}
 
-void clc_implied();
+/*
+ * CLD - Clear Decimal
+ * Clear the decimal flag
+ * 
+ * D = 0
+ */
 
-void cld_implied();
+void CPU::cld_implied() {
+  set_flag(FLAG_DECIMAL, false);
+  cycles +=2;
+}
 
-void cli_implied();
+/*
+ * CLI - Clear Interrupt Disable
+ * Clear the Interrupt disable flag flag
+ * 
+ * I = 0
+ */
+void CPU::cli_implied() {
+  set_flag(FLAG_INTERRUPT, false);
+  cycles +=2;
+}
 
-void clv_implied();
+/*
+ * CLD - Clear Overflow
+ * Clear the overflow flag
+ * 
+ * V = 0
+ */
+void CPU::clv_implied() {
+  set_flag(FLAG_OVERFLOW, false);
+  cycles +=2;
+}
+
+
+/*
+ * CMP - Compare Accumulator
+ * CMP compares A to a memory value, setting flags 
+ * as appropriate but not modifying any registers. 
+ * The comparison is implemented as a subtraction
+ * 
+ * A - memory (Don't modify the accumulator. Use temp var to compare)
+ * 
+ * C - Carry 	    A >= memory
+ * Z - Zero 	    A == memory
+ * N - Negative 	result bit 7 
+ */
+void CPU::cmp_immediate() {
+  uint8_t value = read(PC);
+  PC++;
+  uint8_t tmp_result = (A - value); //we use a temp var for comparison
+
+  set_flag(FLAG_CARRY, (A >= value)); //compare original accumulator value with new value from memory
+  set_flag(FLAG_ZERO, (tmp_result == 0)); //check if result == 0
+  set_flag(FLAG_NEGATIVE, (tmp_result & FLAG_NEGATIVE)); //check if negative bit of result is active
+  cycles += 2;
+}
+
+
+void CPU::cmp_zeropage() {
+  uint8_t base_address = read(PC);
+  PC++;
+  
+  uint8_t value = read(base_address);
+  uint8_t tmp_result = (A - value);
+  set_flag(FLAG_CARRY, (A >= value)); //compare original accumulator value with new value from memory
+  set_flag(FLAG_ZERO, (tmp_result == 0)); //check if result == 0
+  set_flag(FLAG_NEGATIVE, (tmp_result & FLAG_NEGATIVE)); //check if negative bit of result is active
+  cycles += 3;
+}
+void CPU::cmp_zeropage_x() {
+  uint8_t base_address = read(PC); //get initial address
+  PC++;
+
+  uint8_t address = (base_address + X) & 0xFF; //add x to address then zero page
+  uint8_t value = read(address);
+  uint8_t tmp_result = (A - value);
+  set_flag(FLAG_CARRY, (A >= value)); //compare original accumulator value with new value from memory
+  set_flag(FLAG_ZERO, (tmp_result == 0)); //check if result == 0
+  set_flag(FLAG_NEGATIVE, (tmp_result & FLAG_NEGATIVE)); //check if negative bit of result is active
+  cycles += 4;
+}
+void CPU::cmp_absolute() {
+  uint8_t low = read(PC);
+  uint8_t high = read(PC + 1);
+
+  PC +=2;
+
+  uint16_t address = ((high << 8) | low);
+  uint8_t value = read(address);
+  uint8_t tmp_result = (A - value);
+  set_flag(FLAG_CARRY, (A >= value)); //compare original accumulator value with new value from memory
+  set_flag(FLAG_ZERO, (tmp_result == 0)); //check if result == 0
+  set_flag(FLAG_NEGATIVE, (tmp_result & FLAG_NEGATIVE)); //check if negative bit of result is active
+  cycles += 4;
+}
+void CPU::cmp_absolute_x() {
+  uint8_t low = read(PC); //read two bytes on pc
+  uint8_t high = read(PC + 1); 
+  PC += 2;
+  uint16_t address = (high << 8) | low; 
+
+  if ((address & 0xFF00) != ((address + X) & 0xFF00)) { //checking if first byte is the same as original after adding
+    cycles += 1; 
+  }
+
+  address += X; // Add value of X to address
+  uint8_t value = read(address); //read new address
+  uint8_t tmp_result = (A - value);
+  set_flag(FLAG_CARRY, (A >= value)); //compare original accumulator value with new value from memory
+  set_flag(FLAG_ZERO, (tmp_result == 0)); //check if result == 0
+  set_flag(FLAG_NEGATIVE, (tmp_result & FLAG_NEGATIVE)); //check if negative bit of result is active
+  cycles += 4;
+
+}
+void CPU::cmp_absolute_y() {
+  uint8_t low = read(PC); //read two bytes on pc
+  uint8_t high = read(PC + 1); 
+  PC += 2;
+  uint16_t address = (high << 8) | low; 
+
+  if ((address & 0xFF00) != ((address + Y) & 0xFF00)) { //checking if first byte is the same as original after adding
+    cycles += 1; 
+  }
+
+  address += Y; // Add value of Y to address
+  uint8_t value = read(address);
+  uint8_t tmp_result = (A - value);
+  set_flag(FLAG_CARRY, (A >= value)); //compare original accumulator value with new value from memory
+  set_flag(FLAG_ZERO, (tmp_result == 0)); //check if result == 0
+  set_flag(FLAG_NEGATIVE, (tmp_result & FLAG_NEGATIVE)); //check if negative bit of result is active
+  cycles += 4;
+
+}
+
+
+void CPU::cmp_indexed_indirect() {
+  uint8_t initial_val = read(PC);  //read initial value
+  PC++;
+
+  // take initial value and get the high and low bytes using X
+  uint8_t low = read((initial_val + X) & 0xFF);
+  uint8_t high = read((initial_val + X + 1) & 0xFF);
+
+  uint16_t address = high << 8 | low; //combine bytes to get true address
+
+  uint8_t value = read(address);
+  uint8_t tmp_result = (A - value);
+  set_flag(FLAG_CARRY, (A >= value)); //compare original accumulator value with new value from memory
+  set_flag(FLAG_ZERO, (tmp_result == 0)); //check if result == 0
+  set_flag(FLAG_NEGATIVE, (tmp_result & FLAG_NEGATIVE)); //check if negative bit of result is active
+  cycles += 6;
+}
+
+
+void CPU::cmp_indirect_indexed() {
+  uint8_t initial_val = read(PC);
+  PC++;
+
+  // Get zero paged bytes of high and low bytes
+  uint8_t low = read(initial_val & 0xFF);
+  uint8_t high = read((initial_val + 1) & 0xFF);
+  
+  uint16_t init_addr = (high << 8 | low);
+  uint16_t address = (init_addr + Y); //add Y to address
+
+  // account for page crossing
+  if ((init_addr & 0xFF00) != (address & 0xFF00)) {
+    cycles += 1;
+  }
+
+  uint8_t value = read(address);
+  uint8_t tmp_result = (A - value);
+  set_flag(FLAG_CARRY, (A >= value)); //compare original accumulator value with new value from memory
+  set_flag(FLAG_ZERO, (tmp_result == 0)); //check if result == 0
+  set_flag(FLAG_NEGATIVE, (tmp_result & FLAG_NEGATIVE)); //check if negative bit of result is active
+  cycles += 5;
+}
+
+/*
+ * CPX - Compare X
+ * CPX compares X to a memory value, setting flags
+ * as appropriate but not modifying any registers.
+ * The comparison is implemented as a subtraction
+ * 
+ * X - memory (Don't modify the X. Use temp var to compare)
+ * 
+ * C - Carry 	    X >= memory
+ * Z - Zero 	    X == memory
+ * N - Negative 	result bit 7 
+ */
+void CPU::cpx_immediate() {
+  uint8_t value = read(PC);
+  PC++;
+  uint8_t tmp_result = (X - value); //we use a temp var for comparison
+
+  set_flag(FLAG_CARRY, (X >= value)); //compare original X value with new value from memory
+  set_flag(FLAG_ZERO, (tmp_result == 0)); //check if result == 0
+  set_flag(FLAG_NEGATIVE, (tmp_result & FLAG_NEGATIVE)); //check if negative bit of result is active
+  cycles += 2;
+}
+
+void CPU::cpx_zeropage() {
+  uint8_t base_address = read(PC);
+  PC++;
+  
+  uint8_t value = read(base_address);
+  uint8_t tmp_result = (X - value);
+  set_flag(FLAG_CARRY, (X >= value)); //compare original X value with new value from memory
+  set_flag(FLAG_ZERO, (tmp_result == 0)); //check if result == 0
+  set_flag(FLAG_NEGATIVE, (tmp_result & FLAG_NEGATIVE)); //check if negative bit of result is active
+  cycles += 3;
+}
+
+void CPU::cpx_absolute() {
+  uint8_t low = read(PC);
+  uint8_t high = read(PC + 1);
+
+  PC += 2;
+
+  uint16_t address = ((high << 8) | low);
+  uint8_t value = read(address);
+  uint8_t tmp_result = (X - value);
+  set_flag(FLAG_CARRY, (X >= value)); //compare original X value with new value from memory
+  set_flag(FLAG_ZERO, (tmp_result == 0)); //check if result == 0
+  set_flag(FLAG_NEGATIVE, (tmp_result & FLAG_NEGATIVE)); //check if negative bit of result is active
+  cycles += 4;
+}
+
+/*
+ * CPX - Compare Y
+ * CPX compares Y to a memory value, setting flags
+ * as appropriate but not modifying any registers.
+ * The comparison is implemented as a subtraction
+ * 
+ * Y - memory (Don't modify the Y. Use temp var to compare)
+ * 
+ * C - Carry 	    Y >= memory
+ * Z - Zero 	    Y == memory
+ * N - Negative 	result bit 7 
+ */
+void CPU::cpy_immediate() {
+  uint8_t value = read(PC);
+  PC++;
+  uint8_t tmp_result = (Y - value); //we use a temp var for comparison
+
+  set_flag(FLAG_CARRY, (Y >= value)); //compare original Y value with new value from memory
+  set_flag(FLAG_ZERO, (tmp_result == 0)); //check if result == 0
+  set_flag(FLAG_NEGATIVE, (tmp_result & FLAG_NEGATIVE)); //check if negative bit of result is active
+  cycles += 2;
+}
+
+void CPU::cpy_zeropage() {
+  uint8_t base_address = read(PC);
+  PC++;
+  
+  uint8_t value = read(base_address);
+  uint8_t tmp_result = (Y - value);
+  set_flag(FLAG_CARRY, (Y >= value)); //compare original Y value with new value from memory
+  set_flag(FLAG_ZERO, (tmp_result == 0)); //check if result == 0
+  set_flag(FLAG_NEGATIVE, (tmp_result & FLAG_NEGATIVE)); //check if negative bit of result is active
+  cycles += 3;
+}
+
+void CPU::cpy_absolute() {
+  uint8_t low = read(PC);
+  uint8_t high = read(PC + 1);
+
+  PC +=2;
+
+  uint16_t address = ((high << 8) | low);
+  uint8_t value = read(address);
+  uint8_t tmp_result = (Y - value);
+  set_flag(FLAG_CARRY, (Y >= value)); //compare original Y value with new value from memory
+  set_flag(FLAG_ZERO, (tmp_result == 0)); //check if result == 0
+  set_flag(FLAG_NEGATIVE, (tmp_result & FLAG_NEGATIVE)); //check if negative bit of result is active
+  cycles += 4;
+}
+
+/*
+ * DEC - Decrement Memory
+ * DEC subtracts 1 from a memory location.
+ * Then it writes the new value back into the
+ * memory location
+ * 
+ * memory = memory - 1
+ * 
+ * Z - Zero 	    result == 0
+ * N - Negative 	result bit 7 
+ */
+void CPU::dec_zeropage() {
+  uint8_t base_address = read(PC);
+  PC++;
+  
+  uint8_t value = read(base_address);
+  uint8_t result = value - 1;
+  write(base_address, result);
+
+  set_flag(FLAG_ZERO, (result == 0));
+  set_flag(FLAG_NEGATIVE, (result & FLAG_NEGATIVE));
+  cycles += 5;
+}
+void CPU::dec_zeropage_x() {
+  uint8_t base_address = read(PC);
+  PC++;
+
+  uint8_t address = (base_address + X) & 0xFF; //add x to address then zero page
+  uint8_t value = read(address);
+  uint8_t result = value - 1;
+  write(address, result);
+
+  set_flag(FLAG_ZERO, (result == 0));
+  set_flag(FLAG_NEGATIVE, (result & FLAG_NEGATIVE));
+  cycles += 6;
+}
+void CPU::dec_absolute() {
+  uint8_t low = read(PC);  // first byte of address
+  uint8_t high = read(PC + 1); // second byte of address
+
+  PC += 2;
+  uint16_t address = (high << 8) | low; 
+  uint8_t value = read(address);
+  uint8_t result = value - 1;
+  write(address, result);
+
+  set_flag(FLAG_ZERO, (result == 0));
+  set_flag(FLAG_NEGATIVE, (result & FLAG_NEGATIVE));
+  cycles += 6;
+}
+void CPU::dec_absolute_x() {
+  uint8_t low = read(PC); //read two bytes on pc
+  uint8_t high = read(PC + 1); 
+  PC += 2;
+  uint16_t address = (high << 8) | low; 
+  // No need for page cross in this one.
+  address += X;
+  uint8_t value = read(address);
+  uint8_t result = value - 1;
+  write(address, result);
+
+  set_flag(FLAG_ZERO, (result == 0));
+  set_flag(FLAG_NEGATIVE, (result & FLAG_NEGATIVE));
+  cycles += 7;
+}
+
+/*
+ * DEX - Decrement X
+ * DEX subtracts 1 from X
+ * Then it writes the new value back into X.
+ * 
+ * X = X - 1
+ * 
+ * Z - Zero 	    result == 0
+ * N - Negative 	result bit 7 
+ */
+void CPU::dex_implied() {
+  X -= 1;
+  set_flag(FLAG_ZERO, (X == 0));
+  set_flag(FLAG_NEGATIVE, (X & FLAG_NEGATIVE));
+  cycles += 2;
+}
+
+/*
+ * DEY - Decrement Y
+ * DEY subtracts 1 from Y
+ * Then it writes the new value back into Y.
+ * 
+ * Y = Y - 1
+ * 
+ * Z - Zero 	    result == 0
+ * N - Negative 	result bit 7 
+ */
+void CPU::dey_implied() {
+  X -= 1;
+  set_flag(FLAG_ZERO, (X == 0));
+  set_flag(FLAG_NEGATIVE, (X & FLAG_NEGATIVE));
+  cycles += 2;
+}
+
+
+/*
+ * EOR - Bitwise Exclusive OR
+ * EOR exclusive-ORs a memory value and the accumulator
+ * then puts the new value back into the accumulator.
+ * 
+ * A = A ^ memory 
+ * 
+ * Z - Zero 	    result == 0
+ * N - Negative 	result bit 7 
+ */
+void CPU::eor_immediate() {
+  uint8_t value = read(PC);
+  PC++;
+
+  A = (A ^ value);
+  set_flag(FLAG_ZERO, (A == 0));
+  set_flag(FLAG_NEGATIVE, (A & FLAG_NEGATIVE));
+
+  cycles += 2;
+}
+
+void CPU::eor_zeropage() {
+  uint8_t base_address = read(PC);
+  PC++;
+  
+  uint8_t value = read(base_address);
+  A = (A ^ value);
+  set_flag(FLAG_ZERO, (A == 0));
+  set_flag(FLAG_NEGATIVE, (A & FLAG_NEGATIVE));
+
+  cycles += 3;
+}
+void CPU::eor_zeropage_x() {
+  uint8_t base_address = read(PC); //get initial address
+  PC++;
+
+  uint8_t address = (base_address + X) & 0xFF; //add x to address then zero page
+  uint8_t value = read(address);
+  A = (A ^ value);
+  set_flag(FLAG_ZERO, (A == 0));
+  set_flag(FLAG_NEGATIVE, (A & FLAG_NEGATIVE));
+
+  cycles += 4;
+}
+void CPU::eor_absolute() {
+  uint8_t low = read(PC);  // first byte of address
+  uint8_t high = read(PC + 1); // second byte of address
+
+  PC += 2;
+  uint16_t address = (high << 8) | low; 
+  uint8_t value = read(address);
+  A = (A ^ value);
+  set_flag(FLAG_ZERO, (A == 0));
+  set_flag(FLAG_NEGATIVE, (A & FLAG_NEGATIVE));
+
+  cycles += 4;
+}
+void CPU::eor_absolute_x() {
+  uint8_t low = read(PC);
+  uint8_t high = read(PC + 1); 
+  PC += 2;
+  uint16_t address = (high << 8) | low; 
+  // Page cross
+  if ((address & 0xFF00) != ((address + X) & 0xFF00)) { 
+    cycles += 1; 
+  }
+  address += X;
+  uint8_t value = read(address);
+  A = (A ^ value);
+  set_flag(FLAG_ZERO, (A == 0));
+  set_flag(FLAG_NEGATIVE, (A & FLAG_NEGATIVE));
+
+  cycles += 4;
+}
+void CPU::eor_absolute_y() {
+  uint8_t low = read(PC);
+  uint8_t high = read(PC + 1); 
+  PC += 2;
+  uint16_t address = (high << 8) | low; 
+  // Page cross
+  if ((address & 0xFF00) != ((address + Y) & 0xFF00)) { 
+    cycles += 1; 
+  }
+  address +=Y;
+  uint8_t value = read(address);
+  A = (A ^ value);
+  set_flag(FLAG_ZERO, (A == 0));
+  set_flag(FLAG_NEGATIVE, (A & FLAG_NEGATIVE));
+
+  cycles += 4;
+}
+
+void CPU::eor_indexed_indirect() {
+  uint8_t initial_val = read(PC); 
+  PC++;
+
+  uint8_t low = read((initial_val + X) & 0xFF);
+  uint8_t high = read((initial_val + X + 1) & 0xFF);
+
+  uint16_t address = high << 8 | low;
+
+  uint8_t value = read(address);
+  A = (A ^ value);
+  set_flag(FLAG_ZERO, (A == 0));
+  set_flag(FLAG_NEGATIVE, (A & FLAG_NEGATIVE));
+  cycles += 6;
+}
+void CPU::eor_indirect_indexed() {
+    uint8_t initial_val = read(PC);
+  PC++;
+  uint8_t low = read(initial_val & 0xFF);
+  uint8_t high = read((initial_val + 1) & 0xFF);
+  
+  uint16_t init_addr = (high << 8 | low);
+  uint16_t address = (init_addr + Y);
+
+  if ((init_addr & 0xFF00) != (address & 0xFF00)) {
+    cycles += 1;
+  }
+
+  uint8_t value = read(address);
+  A = (A ^ value);
+  set_flag(FLAG_ZERO, (A == 0));
+  set_flag(FLAG_NEGATIVE, (A & FLAG_NEGATIVE));
+  cycles += 5;
+}

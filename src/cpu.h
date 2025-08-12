@@ -237,7 +237,7 @@ class CPU {
   private:
 
     // Accumulator. supports using status register for carrying and overflow detection
-    uint8_t A; // 0x0 in constructor
+    uint8_t A;
 
     //Program counter
     // 16 bits because memory locations can go up to 65,536 bytes or 0xFFFF instead of only 256
