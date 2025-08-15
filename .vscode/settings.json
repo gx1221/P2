@@ -4,6 +4,26 @@
     "istream": "cpp",
     "vector": "cpp",
     "coroutine": "cpp",
-    "xmemory": "cpp"
+    "xmemory": "cpp",
+    "xlocale": "cpp",
+    "algorithm": "cpp",
+    "chrono": "cpp",
+    "optional": "cpp",
+    "system_error": "cpp",
+    "type_traits": "cpp",
+    "xlocmon": "cpp",
+    "xtr1common": "cpp",
+    "xutility": "cpp",
+    "array": "cpp",
+    "format": "cpp",
+    "forward_list": "cpp",
+    "iterator": "cpp",
+    "list": "cpp",
+    "map": "cpp",
+    "memory": "cpp",
+    "unordered_map": "cpp",
+    "xhash": "cpp",
+    "xstring": "cpp",
+    "xtree": "cpp"
   }
 }

@@ -239,11 +239,13 @@ class CPU {
     // Accumulator. supports using status register for carrying and overflow detection
     uint8_t A;
 
-    //Program counter
+    // Program counter
+    // PC is the current memory location. It always points to the next instruction to be
+    // executed, so when reading the PC, it will actually just return the next memory location
     // 16 bits because memory locations can go up to 65,536 bytes or 0xFFFF instead of only 256
-    // remember, the PC literally just stores a value, it's not an array where when incrementing,
-    // it goes up by two positions in an array, when you increment this, it just adds 1 to the value
-    // it doesn't reference anything at all. Treat it like a normal integer (not literally)
+    // remember, the PC literally just stores a value, it's not an array where when incrementing
+    // makes it goes up by two positions in an array, when you increment this, it just adds 1 to the value
+    // it doesn't reference anything at all.
     uint16_t PC; 
 
     // X and Y indexes. Loop counters
@@ -266,8 +268,10 @@ class CPU {
       then goes down to the next available spot to show that it's
       available. For example, If SP = 0xFF, and we push, 0x01FF
       is filled, then SP-- to 0xFE.
+
+      initialize to 0xFF after reset to start at beginning 0x01FF
     */
-    uint8_t SP; //  initialize to 0xFF after reset to start at beginngin 0x01FF
+    uint8_t SP; 
 
     /*
       Status register. An 8-bit register. Each bit is a flag
@@ -354,6 +358,29 @@ val = PEEK((arg % 256); you can also do (& 0xFF) instead
 
 If the value/variables are 8-bits, then you don't need to zero page it
 It automatically zero pages it.
+Example: 
+  uint8_t address = read(PC);
+  PC++;
+  
+  uint8_t value = read(address);
+
+  
+Zero Page X: Get the next 8 bit value and add it to whatever is in the X register.
+After that, modulo the value you got by 0xFF to get the zero page and read the
+value at the modulo'd memory location to get what you need
+Example: LDA $FC -> if X = 0x04, then ((0xFC + 0x04) % 0xFF) = 0x01. then read(0x01) and store into A
+val = PEEK((arg + X) % 256) 
+
+remember, no need for the zero paging if variables are 8-bits
+
+Example 2: 
+  uint8_t base_address = read(PC); //get initial address
+  PC++;
+
+  uint8_t address = (base_address + X) & 0xFF; //add x to address then zero page
+  uint8_t value = read(address);
+
+Zero Page Y: same as zero page X, but with Y
 
 
 
@@ -364,8 +391,9 @@ Example: LDX $FE $10 -> reads 0x10FE and stores read value in X (remember NES is
   uint8_t high = read(PC + 1); // second byte of address
 
   PC += 2;
-  uint16_t addr = (high << 8) | low; // 00hi -> hi00 -> hilo puts first byte into beginning and adds low byte using or since it takes over last 8 bits
-  uint8_t value = read(addr);
+  uint16_t address = (high << 8) | low; 
+  // 00hi -> hi00 -> hilo puts first byte into beginning and adds low byte using or since it takes over last 8 bits
+  uint8_t value = read(address);
 
 
 Absolute Indexed X: Take what's already in the X register add it to the value, then
@@ -378,43 +406,28 @@ Example 2:
   uint8_t low = read(PC); //read two bytes on pc
   uint8_t high = read(PC + 1); 
   PC += 2;
-  uint16_t address = (high << 8) | low; // then check for page crossing
+  uint16_t address = (high << 8) | low; 
+  // Page cross
+  if ((address & 0xFF00) != ((address + X) & 0xFF00)) { //checking if first byte is the same as original after adding
+    cycles += 1; 
+  }
   address += X;
-  uint8_t value = read(address)  /read address with X added
-  / use that value as the value
+  uint8_t value = read(address);  //read address with X added
+  
 
 Absolute Indexed Y: same as previous, but with Y register
 
 
 
 
-Zero Page X: Get the next 8 bit value and add it to whatever is in the X register.
-After that, modulo the value you got by 0xFF to get the zero page and read the
-value at the modulo'd memory location to get what you need
-Example: LDA $FC -> if X = 0x04, then ((0xFC + 0x04) % 0xFF) = 0x01. then read(0x01) and store into A
-val = PEEK((arg + X) % 256) 
-
-remember, no need for the zero paging if variables are 8-bits
-
-Example 2: 
-  uint8_t init_address = read(PC); //get inital address
-  PC++;
-
-  uint8_t address = (init_address + X) & 0xFF; //add x to address then zero page
-  uint8_t value = read(address);
-
-Zero Page Y: same as zero page X, but with Y
-
-
-
-
 
 Indexed indirect (d, X): you take the 8-bit value, add what's in the X register, then wrap it in the zero-page.
-After that, you use this zero-paged address and the address+1 (not PC + 1, since PC goes anywhere) to get two bytes of values in the zero page, the low byte and high byte.
+After that, you use this zero-paged address and the address+1 (not PC + 1, since PC can jump to other place) 
+to get two bytes of values in the zero page, the low byte and high byte.
 You take the bytes, combine them into a 16-bit value, and use that as an index to get your true value.
 Example: LDA $20 ->
-         Low = read((0x20 + X) % 256)
-         High = read((0x20 + X + 1) % 256) # take the next byte
+         Low = read((0x20 + X) & 0xFF)
+         High = read((0x20 + X + 1) & 0xFF) # take the next byte after val + X
          address = high << 8 | low
          read(address)
 
@@ -422,8 +435,8 @@ Example 2:
   uint8_t initial_val = read(PC); 
   PC++;
 
-  uint8_t low = read((initial_val + X) % 256);
-  uint8_t high = read((initial_val + X + 1) % 256);
+  uint8_t low = read((initial_val + X) & 0xFF);
+  uint8_t high = read((initial_val + X + 1) & 0xFF);
 
   uint16_t address = high << 8 | low;
 
@@ -438,8 +451,8 @@ you read the value at the zero-paged byte and then read another byte at the addr
 Once you get the two bytes from the addresses, you add what's in the Y register to that address
 to get the final address, then you read that.
 Example: LDA $20 -> 
-         low = read((0x20) % 256)
-         high = read((0x20 + 1) % 256)
+         low = read((0x20) & 0xFF)
+         high = read((0x20 + 1) & 0xFF)
          address = (high << 8 | low) + Y
          read(address)
 
@@ -447,8 +460,8 @@ Example 2:
 
   uint8_t initial_val = read(PC);
   PC++;
-  uint8_t low = read(initial_val % 256);
-  uint8_t high = read((initial_val + 1) % 256);
+  uint8_t low = read(initial_val & 0xFF);
+  uint8_t high = read((initial_val + 1) & 0xFF);
   
   uint16_t init_addr = (high << 8 | low);
   uint16_t address = (init_addr + Y);
@@ -466,7 +479,10 @@ Example 2:
 
   Accumulator: apply operation directly on the accumulator or A.
 
-  Realtive: branch somewhere
+  Relative: branch somewhere
+
+  implied: The instruction doesn't require any bytes
+  or data. It just executes instructions without any info
 
 
 */
