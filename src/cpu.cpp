@@ -1,5 +1,4 @@
 #include "cpu.h"
-
 CPU::CPU() {
   A = 0x0;
   X = 0x0;
@@ -7,8 +6,7 @@ CPU::CPU() {
   SP = 0xFD;
   P = 0x0;
 
-  reset_vector = read(0xFFFC) | (read(0xFFFD) << 8);
-  PC = reset_vector;
+  mapper = nullptr;
 
   memset(CPU_memory, 0, sizeof(CPU_memory));
   memset(opcode_table, 0, sizeof(opcode_table));
@@ -16,6 +14,8 @@ CPU::CPU() {
   cycles = 0;
 
 }
+
+
 
 void CPU::set_flag(uint8_t flag, bool condition) {
     if (condition)
@@ -28,12 +28,22 @@ uint8_t CPU::read(uint16_t address) const {
   if (address >= 0x2000 && address < 0x4000) {
     //call ppu function
   }
+  if (address >= 0x8000 && mapper) {
+
+    return mapper->read_cpu(address);
+  }
   return CPU_memory[address]; 
 }
 
 void CPU::write(uint16_t address, uint8_t value) { 
   if (address >= 0x2000 && address < 0x4000) {
-      //call ppu function
+    
+    return;
+    //call ppu function
+  }
+  if (address >= 0x8000 && mapper) {
+    mapper->write_cpu(address, value);
+    return;
   }
   CPU_memory[address] = value; 
 }
@@ -52,28 +62,63 @@ uint8_t CPU::pop() {
 }
 
 
+// function to parse and load ROM
 void CPU::loadROM(const std::string& filename) {
-    std::ifstream file(filename, std::ios::binary | std::ios::ate);
-    if (!file.is_open()) {
-        std::cerr << "Failed to open ROM: " << filename << std::endl;
-        return;
-    }
+  std::ifstream file(filename, std::ios::binary); //opening file in binary mode and read
+  if (!file) {
+    printf("No file found");
+  }
+  assert(file);
+  std::vector<uint8_t> header(16); // store the 16 bytes of info from header and initialize to 0 with ()
+  file.seekg(0, std::ios::beg); //start at beginning of file
 
-    std::streamsize size = file.tellg();
-    file.seekg(0, std::ios::beg);
+  // Since read can only read char* we use reinterpret cast the header pointer.
+  // Also tell it to read bytes equal to the header's size (16)
+  file.read(reinterpret_cast<char*>(header.data()), header.size());
+  if (!file) {
+    printf("can't read header");
+  }
+  
+  // take the 4 high and low nibbles at each flag
+  // one byte -> 76543210
+  // take first 4 bits each from the bytes in flags 6 and 7
 
-    std::vector<char> buffer(size);
-    if (!file.read(buffer.data(), size)) {
-        std::cerr << "Failed to read ROM." << std::endl;
-        return;
-    }
+  uint8_t high_map = (header.at(7) & 0xF0);
+  uint8_t low_map = (header.at(6) & 0xF0) >> 4;
 
-    // Load into memory starting at 0x200
-    for (int i = 0; i < size; ++i) {
-        CPU::write(0x4020 + i, static_cast<uint8_t>(buffer[i]));
-    }
+  //combine into one 8-bit value
+  uint8_t map = (high_map) | low_map;
 
-    file.close();
+
+  //Prg-rom is where all the game's "program" is stored
+  size_t prg_size = header.at(4) * 16384; // getting the total size of PRG ROM data
+  std::vector<uint8_t> prg_data(prg_size);
+  file.read(reinterpret_cast<char*>(prg_data.data()), prg_size);
+  if (!file) {
+    printf("can't read prgdata");
+  }
+
+  // Chr-rom is the place where the graphics will pull characters and sprites from
+  // Chr is stored in $0000–$1FFF for PPU pattern table
+  size_t chr_size = header.at(5) * 8192; // getting the total size of CHR ROM data
+  std::vector<uint8_t> chr_data(chr_size);
+  file.read(reinterpret_cast<char*>(chr_data.data()), chr_size);
+  if (!file) {
+    printf("can't read chrdata");
+  }
+
+  // look at whether the mirroring is vertical or horizontal
+  bool vertical = (header.at(6) & 0x01) != 0;
+
+  if (map == 0) {
+      mapper = new Mapper0(prg_data, chr_data, vertical);
+  }
+
+  // After everything is loaded and initialized, we can set the reset vector.
+  reset_vector = read(0xFFFC) | (read(0xFFFD) << 8);
+  PC = reset_vector;
+
+  file.close();
 }
 
 uint8_t CPU::fetch() { //fetch 16 bits because opcode can go up to the 
@@ -85,33 +130,277 @@ uint8_t CPU::fetch() { //fetch 16 bits because opcode can go up to the
 } 
 
 
-void CPU::decode_and_execute(uint8_t opcode) {
-  //uint8_t opcode = fetch();
-  //opcode_table[opcode]();
+void CPU::step() {
+  uint8_t opcode = fetch();         // fetch next opcode
+  (this->*opcode_table[opcode])();  // call the member function
 }
 
-//REMEMBER TO SET CYCLES AND FLAGS
-/*
-void init_opcode_table(void) {
-    Clear all entries to a default handler (e.g. illegal opcode)
-    for (int i = 0; i < 256; ++i) {
-        opcode_table[i] = illegal_instruction;
-    }
-
-    Assign valid handlers
-    opcode_table[0xA9] = lda_immediate;  // LDA #immediate
-    opcode_table[0xA5] = lda_zeropage;   // LDA zeropage
-    opcode_table[0x00] = brk;            // BRK
-    assign all 151 official opcodes
-}
-*/
 
 
 void CPU::illegal_instruction() {
     printf("Illegal opcode 0x%02X at PC=0x%04X\n", read(PC - 1), PC - 1); // Tracking opcode and location
-    bad_instruction = true; //
+    bad_instruction = true; 
 }
 
+void CPU::init_opcode_table() {
+  for (int i = 0; i < 256; ++i) {
+    opcode_table[i] = &CPU::illegal_instruction;
+  }
+
+  // ADC - Add with Carry
+  opcode_table[0x69] = &CPU::adc_immediate;
+  opcode_table[0x65] = &CPU::adc_zeropage;
+  opcode_table[0x75] = &CPU::adc_zeropage_x;
+  opcode_table[0x6D] = &CPU::adc_absolute;
+  opcode_table[0x7D] = &CPU::adc_absolute_x;
+  opcode_table[0x79] = &CPU::adc_absolute_y;
+  opcode_table[0x61] = &CPU::adc_indexed_indirect;
+  opcode_table[0x71] = &CPU::adc_indirect_indexed;
+
+  // AND - Bitwise AND
+  opcode_table[0x29] = &CPU::and_immediate;
+  opcode_table[0x25] = &CPU::and_zeropage;
+  opcode_table[0x35] = &CPU::and_zeropage_x;
+  opcode_table[0x2D] = &CPU::and_absolute;
+  opcode_table[0x3D] = &CPU::and_absolute_x;
+  opcode_table[0x39] = &CPU::and_absolute_y;
+  opcode_table[0x21] = &CPU::and_indexed_indirect;
+  opcode_table[0x31] = &CPU::and_indirect_indexed;
+
+  // ASL - Arithmetic Shift Left
+  opcode_table[0x0A] = &CPU::asl_accumulator;
+  opcode_table[0x06] = &CPU::asl_zeropage;
+  opcode_table[0x16] = &CPU::asl_zeropage_x;
+  opcode_table[0x0E] = &CPU::asl_absolute;
+  opcode_table[0x1E] = &CPU::asl_absolute_x;
+
+  // BCC - Branch if Carry Clear
+  opcode_table[0x90] = &CPU::bcc_relative;
+
+  // BCS - Branch if Carry Set
+  opcode_table[0xB0] = &CPU::bcs_relative;
+
+  // BEQ - Branch if Equal
+  opcode_table[0xF0] = &CPU::beq_relative;
+
+  // BIT - Bit Test
+  opcode_table[0x24] = &CPU::bit_zeropage;
+  opcode_table[0x2C] = &CPU::bit_absolute;
+
+  // BMI - Branch if Minus
+  opcode_table[0x30] = &CPU::bmi_relative;
+
+  // BNE - Branch if Not Equal
+  opcode_table[0xD0] = &CPU::bne_relative;
+
+  // BPL - Branch if Plus
+  opcode_table[0x10] = &CPU::bpl_relative;
+
+  // BRK - Break
+  opcode_table[0x00] = &CPU::brk_implied;  //just going to use the implied version
+
+  // BVC - Branch if Overflow Clear
+  opcode_table[0x50] = &CPU::bvc_relative;
+
+  // BVS - Branch if Overflow Set
+  opcode_table[0x70] = &CPU::bvs_relative;
+
+  // CLC - Clear Carry
+  opcode_table[0x18] = &CPU::clc_implied;
+
+  // CLD - Clear Decimal
+  opcode_table[0xD8] = &CPU::cld_implied;
+
+  // CLI - Clear Interrupt Disable
+  opcode_table[0x58] = &CPU::cli_implied;
+
+  // CLV - Clear Overflow
+  opcode_table[0xB8] = &CPU::clv_implied;
+
+  // CMP - Compare A
+  opcode_table[0xC9] = &CPU::cmp_immediate;
+  opcode_table[0xC5] = &CPU::cmp_zeropage;
+  opcode_table[0xD5] = &CPU::cmp_zeropage_x;
+  opcode_table[0xCD] = &CPU::cmp_absolute;
+  opcode_table[0xDD] = &CPU::cmp_absolute_x;
+  opcode_table[0xD9] = &CPU::cmp_absolute_y;
+  opcode_table[0xC1] = &CPU::cmp_indexed_indirect;
+  opcode_table[0xD1] = &CPU::cmp_indirect_indexed;
+
+  // CPX - Compare X
+  opcode_table[0xE0] = &CPU::cpx_immediate;
+  opcode_table[0xE4] = &CPU::cpx_zeropage;
+  opcode_table[0xEC] = &CPU::cpx_absolute;
+
+  // CPY - Compare Y
+  opcode_table[0xC0] = &CPU::cpy_immediate;
+  opcode_table[0xC4] = &CPU::cpy_zeropage;
+  opcode_table[0xCC] = &CPU::cpy_absolute;
+
+  // DEC - Decrement Memory
+  opcode_table[0xC6] = &CPU::dec_zeropage;
+  opcode_table[0xD6] = &CPU::dec_zeropage_x;
+  opcode_table[0xCE] = &CPU::dec_absolute;
+  opcode_table[0xDE] = &CPU::dec_absolute_x;
+
+  // DEX - Decrement X
+  opcode_table[0xCA] = &CPU::dex_implied;
+
+  // DEY - Decrement Y
+  opcode_table[0x88] = &CPU::dey_implied;
+
+  // EOR - Exclusive OR
+  opcode_table[0x49] = &CPU::eor_immediate;
+  opcode_table[0x45] = &CPU::eor_zeropage;
+  opcode_table[0x55] = &CPU::eor_zeropage_x;
+  opcode_table[0x4D] = &CPU::eor_absolute;
+  opcode_table[0x5D] = &CPU::eor_absolute_x;
+  opcode_table[0x59] = &CPU::eor_absolute_y;
+  opcode_table[0x41] = &CPU::eor_indexed_indirect;
+  opcode_table[0x51] = &CPU::eor_indirect_indexed;
+
+  // INC - Increment Memory
+  opcode_table[0xE6] = &CPU::inc_zeropage;
+  opcode_table[0xF6] = &CPU::inc_zeropage_x;
+  opcode_table[0xEE] = &CPU::inc_absolute;
+  opcode_table[0xFE] = &CPU::inc_absolute_x;
+
+  // INX - Increment X
+  opcode_table[0xE8] = &CPU::inx_implied;
+
+  // INY - Increment Y
+  opcode_table[0xC8] = &CPU::iny_implied;
+
+  // JMP - Jump
+  opcode_table[0x4C] = &CPU::jmp_absolute;
+  opcode_table[0x6C] = &CPU::jmp_indirect;
+
+  // JSR - Jump to Subroutine
+  opcode_table[0x20] = &CPU::jsr_absolute;
+
+  // LDA - Load A
+  opcode_table[0xA9] = &CPU::lda_immediate;
+  opcode_table[0xA5] = &CPU::lda_zeropage;
+  opcode_table[0xB5] = &CPU::lda_zeropage_x;
+  opcode_table[0xAD] = &CPU::lda_absolute;
+  opcode_table[0xBD] = &CPU::lda_absolute_x;
+  opcode_table[0xB9] = &CPU::lda_absolute_y;
+  opcode_table[0xA1] = &CPU::lda_indexed_indirect;
+  opcode_table[0xB1] = &CPU::lda_indirect_indexed;
+
+  // LDX - Load X
+  opcode_table[0xA2] = &CPU::ldx_immediate;
+  opcode_table[0xA6] = &CPU::ldx_zeropage;
+  opcode_table[0xB6] = &CPU::ldx_zeropage_y;
+  opcode_table[0xAE] = &CPU::ldx_absolute;
+  opcode_table[0xBE] = &CPU::ldx_absolute_y;
+
+  // LDY - Load Y
+  opcode_table[0xA0] = &CPU::ldy_immediate;
+  opcode_table[0xA4] = &CPU::ldy_zeropage;
+  opcode_table[0xB4] = &CPU::ldy_zeropage_x;
+  opcode_table[0xAC] = &CPU::ldy_absolute;
+  opcode_table[0xBC] = &CPU::ldy_absolute_x;
+
+  // LSR - Logical Shift Right
+  opcode_table[0x4A] = &CPU::lsr_accumulator;
+  opcode_table[0x46] = &CPU::lsr_zeropage;
+  opcode_table[0x56] = &CPU::lsr_zeropage_x;
+  opcode_table[0x4E] = &CPU::lsr_absolute;
+  opcode_table[0x5E] = &CPU::lsr_absolute_x;
+
+  // NOP - No Operation
+  opcode_table[0xEA] = &CPU::nop_implied;
+
+  // ORA - Inclusive OR
+  opcode_table[0x09] = &CPU::ora_immediate;
+  opcode_table[0x05] = &CPU::ora_zeropage;
+  opcode_table[0x15] = &CPU::ora_zeropage_x;
+  opcode_table[0x0D] = &CPU::ora_absolute;
+  opcode_table[0x1D] = &CPU::ora_absolute_x;
+  opcode_table[0x19] = &CPU::ora_absolute_y;
+  opcode_table[0x01] = &CPU::ora_indexed_indirect;
+  opcode_table[0x11] = &CPU::ora_indirect_indexed;
+
+  // PHA - Push A
+  opcode_table[0x48] = &CPU::pha_implied;
+
+  // PHP - Push Processor Status
+  opcode_table[0x08] = &CPU::php_implied;
+
+  // PLA - Pull A
+  opcode_table[0x68] = &CPU::pla_implied;
+
+  // PLP - Pull Processor Status
+  opcode_table[0x28] = &CPU::plp_implied;
+
+  // ROL - Rotate Left
+  opcode_table[0x2A] = &CPU::rol_accumulator;
+  opcode_table[0x26] = &CPU::rol_zeropage;
+  opcode_table[0x36] = &CPU::rol_zeropage_x;
+  opcode_table[0x2E] = &CPU::rol_absolute;
+  opcode_table[0x3E] = &CPU::rol_absolute_x;
+
+  // ROR - Rotate Right
+  opcode_table[0x6A] = &CPU::ror_accumulator;
+  opcode_table[0x66] = &CPU::ror_zeropage;
+  opcode_table[0x76] = &CPU::ror_zeropage_x;
+  opcode_table[0x6E] = &CPU::ror_absolute;
+  opcode_table[0x7E] = &CPU::ror_absolute_x;
+
+  // RTI - Return from Interrupt
+  opcode_table[0x40] = &CPU::rti_implied;
+
+  // RTS - Return from Subroutine
+  opcode_table[0x60] = &CPU::rts_implied;
+
+  // SBC - Subtract with Carry
+  opcode_table[0xE9] = &CPU::sbc_immediate;
+  opcode_table[0xE5] = &CPU::sbc_zeropage;
+  opcode_table[0xF5] = &CPU::sbc_zeropage_x;
+  opcode_table[0xED] = &CPU::sbc_absolute;
+  opcode_table[0xFD] = &CPU::sbc_absolute_x;
+  opcode_table[0xF9] = &CPU::sbc_absolute_y;
+  opcode_table[0xE1] = &CPU::sbc_indexed_indirect;
+  opcode_table[0xF1] = &CPU::sbc_indirect_indexed;
+
+  // SEC - Set Carry
+  opcode_table[0x38] = &CPU::sec_implied;
+
+  // SED - Set Decimal
+  opcode_table[0xF8] = &CPU::sed_implied;
+
+  // SEI - Set Interrupt Disable
+  opcode_table[0x78] = &CPU::sei_implied;
+
+  // STA - Store A
+  opcode_table[0x85] = &CPU::sta_zeropage;
+  opcode_table[0x95] = &CPU::sta_zeropage_x;
+  opcode_table[0x8D] = &CPU::sta_absolute;
+  opcode_table[0x9D] = &CPU::sta_absolute_x;
+  opcode_table[0x99] = &CPU::sta_absolute_y;
+  opcode_table[0x81] = &CPU::sta_indexed_indirect;
+  opcode_table[0x91] = &CPU::sta_indirect_indexed;
+
+  // STX - Store X
+  opcode_table[0x86] = &CPU::stx_zeropage;
+  opcode_table[0x96] = &CPU::stx_zeropage_y;
+  opcode_table[0x8E] = &CPU::stx_absolute;
+
+  // STY - Store Y
+  opcode_table[0x84] = &CPU::sty_zeropage;
+  opcode_table[0x94] = &CPU::sty_zeropage_x;
+  opcode_table[0x8C] = &CPU::sty_absolute;
+
+  // Transfer Instructions
+  opcode_table[0xAA] = &CPU::tax_implied;
+  opcode_table[0xA8] = &CPU::tay_implied;
+  opcode_table[0xBA] = &CPU::tsx_implied;
+  opcode_table[0x8A] = &CPU::txa_implied;
+  opcode_table[0x9A] = &CPU::txs_implied;
+  opcode_table[0x98] = &CPU::tya_implied;
+
+}
   
 // SIGH, I didn't realize until halfway through implementing the
 // opcodes that I could just put the process of putting finding

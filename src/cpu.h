@@ -2,11 +2,16 @@
 #include <assert.h>
 #include <cstdlib>
 #include <chrono>
+#include <cstddef>
+#include <cstring>
 #include <ctime>
 #include <fstream>
 #include <iostream>
 #include <stdint.h>
+#include <string>
 #include <vector>
+
+#include "mapper.h"
 
 #define FLAG_CARRY     0x01
 #define FLAG_ZERO      0x02
@@ -21,7 +26,11 @@
 
 class CPU {
   public:
+    CPU();
     typedef void (*instruction_table)(void);
+
+    //look up table to store all functions pointers
+    void (CPU::*opcode_table[256])();
 
     void set_flag(uint8_t, bool);
     uint8_t read(uint16_t) const;
@@ -30,8 +39,9 @@ class CPU {
     uint8_t pop();
     void loadROM(const std::string&);
     uint8_t fetch();
-    void decode_and_execute(uint8_t);
     void step(); // Can't call it cycle since some instructions use multiple cycles
+
+    void init_opcode_table();
 
     void illegal_instruction();
     void adc_immediate();
@@ -299,14 +309,13 @@ class CPU {
     // locations for the ppu and require calling another function.
     uint8_t CPU_memory[65536];
 
-    //look up table to store all functionspointers
-    instruction_table opcode_table[256];
-
     uint16_t reset_vector;
     
     bool bad_instruction;
 
     uint64_t cycles;
+    
+    Mapper* mapper; 
 
 };
 
@@ -336,6 +345,31 @@ $FFFC Reset Vector
 $FFFE IRQ/BRK Vector
 
 */
+
+/* .INES file format
+
+1.  Header (16 bytes)
+2.  Trainer, if present (0 or 512 bytes)
+3.  PRG ROM data (16384 * x bytes) (x is flag 4)
+4.  CHR ROM data, if present (8192 * y bytes)  (y is flag 5)
+5.  PlayChoice INST-ROM, if present (0 or 8192 bytes)
+6.  PlayChoice PROM, if present (This is often missing) 
+
+Header format
+___________________________________________________________________
+bytes  | description
+0-3 	 | Constant $4E $45 $53 $1A (ASCII "NES" followed by MS-DOS end-of-file)
+4 	   | Size of PRG ROM in 16 KB units
+5 	   | Size of CHR ROM in 8 KB units (value 0 means the board uses CHR RAM)
+6 	   | Flags 6 – Mapper, mirroring, battery, trainer
+7 	   | Flags 7 – Mapper, VS/Playchoice, NES 2.0
+8 	   | Flags 8 – PRG-RAM size (rarely used extension)
+9 	   | Flags 9 – TV system (rarely used extension)
+10 	   | Flags 10 – TV system, PRG-RAM presence (unofficial, rarely used extension)
+11-15  | Unused padding (should be filled with zero, but some rippers put their name across bytes 7-15) 
+___________________________________________________________________
+*/
+
 
 /*
 ========================
@@ -377,7 +411,8 @@ Example 2:
   uint8_t base_address = read(PC); //get initial address
   PC++;
 
-  uint8_t address = (base_address + X) & 0xFF; //add x to address then zero page
+  uint8_t address = (base_address + X) & 0xFF; 
+  //add x to address then zero page
   uint8_t value = read(address);
 
 Zero Page Y: same as zero page X, but with Y
