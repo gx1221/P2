@@ -29,9 +29,21 @@ class CPU {
     CPU();
     typedef void (*instruction_table)(void);
 
+
+
     //look up table to store all functions pointers
     void (CPU::*opcode_table[256])();
 
+    uint8_t get_A();
+    uint8_t get_PC();
+    uint8_t get_X();
+    uint8_t get_Y();
+    uint8_t get_SP();
+    uint8_t get_P();
+    uint64_t get_cycles();
+    uint8_t getCurrentOpcode() const;
+
+    uint8_t print_opcode();
     void set_flag(uint8_t, bool);
     uint8_t read(uint16_t) const;
 		void write(uint16_t, uint8_t);
@@ -307,7 +319,7 @@ class CPU {
     // Only the first 2k Bytes is ram Memory, but the rest
     // are for other functionality. 0x2000 - 0x3FFF are separate memory
     // locations for the ppu and require calling another function.
-    uint8_t CPU_memory[65536];
+    uint8_t system_memory[65536];
 
     uint16_t reset_vector;
     
@@ -317,6 +329,7 @@ class CPU {
     
     Mapper* mapper; 
 
+    uint8_t currentOpcode;  // store last fetched opcode
 };
 
 /*

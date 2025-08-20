@@ -4,19 +4,41 @@ CPU::CPU() {
   X = 0x0;
   Y = 0x0;
   SP = 0xFD;
-  P = 0x0;
+  P = 0x34;
 
   mapper = nullptr;
 
-  memset(CPU_memory, 0, sizeof(CPU_memory));
+  memset(system_memory, 0, sizeof(system_memory));
   memset(opcode_table, 0, sizeof(opcode_table));
   bad_instruction = false;
   cycles = 0;
 
 }
 
+// Basic getters for debug purposes
+uint8_t CPU::get_A() { return A; }
+
+uint8_t CPU::get_PC() { return PC; }
+
+uint8_t CPU::get_X() { return X; }
+
+uint8_t CPU::get_Y() { return Y; }
+
+uint8_t CPU::get_SP() { return SP; }
+
+uint8_t CPU::get_P() { return P; }
+
+uint64_t CPU::get_cycles() { return cycles; }
+
+uint8_t CPU::getCurrentOpcode() const { return currentOpcode; }
 
 
+/*
+ * setting flag bits on or off based on
+ * the flag macro constants
+ * 
+ * set_flag(FLAG_CARRY, true)
+ */
 void CPU::set_flag(uint8_t flag, bool condition) {
     if (condition)
         P |= flag;
@@ -24,15 +46,23 @@ void CPU::set_flag(uint8_t flag, bool condition) {
         P &= ~flag;
 }
 
+/*
+ * Generalized read function to read
+ * from all parts of the emulator
+ */
 uint8_t CPU::read(uint16_t address) const {
-  if (address >= 0x2000 && address < 0x4000) {
-    //call ppu function
-  }
-  if (address >= 0x8000 && mapper) {
+    if (address >= 0x2000 && address < 0x4000) {
+        // Handle PPU registers
+        switch (address & 0x2007) {  // Mirror every 8 bytes
+        }
+    }
 
-    return mapper->read_cpu(address);
-  }
-  return CPU_memory[address]; 
+    // Making sure the mapper is there
+    if (address >= 0x8000 && mapper) {
+        return mapper->read_cpu(address);
+    }
+
+    return system_memory[address];
 }
 
 void CPU::write(uint16_t address, uint8_t value) { 
@@ -45,20 +75,25 @@ void CPU::write(uint16_t address, uint8_t value) {
     mapper->write_cpu(address, value);
     return;
   }
-  CPU_memory[address] = value; 
+  system_memory[address] = value; 
 }
 
+// Push a value onto the stack
 void CPU::push(uint8_t value) {
-  CPU_memory[0x100 + SP] = value;
+  system_memory[0x100 + SP] = value;
   SP--;  // Decrement SP after push
   assert((0x100 + SP) >= 0x100);
 }
 
-
+/* 
+ * Remove the current value pointed to
+ * from the stack and return the removed
+ * value 
+ */
 uint8_t CPU::pop() {
   SP++;  // increment SP on pop
   assert((0x100 + SP) <= 0x1FF);
-  return CPU_memory[0x100 + SP];
+  return system_memory[0x100 + SP];
 }
 
 
@@ -115,20 +150,25 @@ void CPU::loadROM(const std::string& filename) {
   }
 
   // After everything is loaded and initialized, we can set the reset vector.
-  reset_vector = read(0xFFFC) | (read(0xFFFD) << 8);
+  if (prg_size >= 0x8000) { // 32 KB PRG
+    reset_vector = prg_data[0x7FFC] | (prg_data[0x7FFD] << 8);
+  } 
+  else { // 16 KB PRG, mirrored
+    reset_vector = prg_data[0x3FFC] | (prg_data[0x3FFD] << 8);
+  }
   PC = reset_vector;
 
   file.close();
 }
 
 uint8_t CPU::fetch() { //fetch 16 bits because opcode can go up to the 
-  assert(CPU_memory);
+  assert(system_memory);
   assert(!bad_instruction);
-  uint8_t opcode = CPU::read(PC);
+  currentOpcode = CPU::read(PC);
   PC++; //read opcode, then increment PC
-  return opcode;
+  //printf("Executing opcode: 0x%02X at PC=0x%04X\n", currentOpcode, PC);
+  return currentOpcode;
 } 
-
 
 void CPU::step() {
   uint8_t opcode = fetch();         // fetch next opcode
@@ -1577,9 +1617,9 @@ void CPU::dex_implied() {
  * N - Negative 	result bit 7 
  */
 void CPU::dey_implied() {
-  X -= 1;
-  set_flag(FLAG_ZERO, (X == 0));
-  set_flag(FLAG_NEGATIVE, (X & FLAG_NEGATIVE));
+  Y -= 1;
+  set_flag(FLAG_ZERO, (Y == 0));
+  set_flag(FLAG_NEGATIVE, (Y & FLAG_NEGATIVE));
   cycles += 2;
 }
 
@@ -1955,6 +1995,7 @@ void CPU::lda_absolute() {
 
   PC += 2;
   uint16_t address = (high << 8) | low; 
+  //printf("0x%04X\n", address);
   uint8_t value = read(address);
   A = value;
 
