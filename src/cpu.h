@@ -23,10 +23,15 @@
 #define FLAG_NEGATIVE  0x80
 
 
-
+class PPU; // forward declaration
 class CPU {
   public:
-    CPU();
+    PPU* ppu;
+
+    CPU(PPU* ppu_ref);
+    void connectPPU(PPU*);
+
+
     typedef void (*instruction_table)(void);
 
 
@@ -35,13 +40,15 @@ class CPU {
     void (CPU::*opcode_table[256])();
 
     uint8_t get_A();
-    uint8_t get_PC();
     uint8_t get_X();
     uint8_t get_Y();
     uint8_t get_SP();
     uint8_t get_P();
-    uint64_t get_cycles();
+    uint16_t get_PC();
+    uint64_t& get_cycles();
+    Mapper& get_mapper();
     uint8_t getCurrentOpcode() const;
+
 
     uint8_t print_opcode();
     void set_flag(uint8_t, bool);
@@ -53,6 +60,7 @@ class CPU {
     uint8_t fetch();
     void step(); // Can't call it cycle since some instructions use multiple cycles
 
+    void nmi();
     void init_opcode_table();
 
     void illegal_instruction();
@@ -257,7 +265,6 @@ class CPU {
     
   
   private:
-
     // Accumulator. supports using status register for carrying and overflow detection
     uint8_t A;
 

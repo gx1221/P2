@@ -1,5 +1,7 @@
 #include "cpu.h"
-CPU::CPU() {
+#include "ppu.h"
+
+CPU::CPU(PPU* ppu_ref) : ppu(ppu_ref) { //take in PPU reference and initalize it
   A = 0x0;
   X = 0x0;
   Y = 0x0;
@@ -18,7 +20,7 @@ CPU::CPU() {
 // Basic getters for debug purposes
 uint8_t CPU::get_A() { return A; }
 
-uint8_t CPU::get_PC() { return PC; }
+uint16_t CPU::get_PC() { return PC; }
 
 uint8_t CPU::get_X() { return X; }
 
@@ -28,10 +30,15 @@ uint8_t CPU::get_SP() { return SP; }
 
 uint8_t CPU::get_P() { return P; }
 
-uint64_t CPU::get_cycles() { return cycles; }
+uint64_t& CPU::get_cycles() { return cycles; }
 
 uint8_t CPU::getCurrentOpcode() const { return currentOpcode; }
 
+Mapper& CPU::get_mapper() { return *mapper; }
+
+void CPU::connectPPU(PPU* ppu_ref) {
+  ppu = ppu_ref;
+}
 
 /*
  * setting flag bits on or off based on
@@ -51,38 +58,59 @@ void CPU::set_flag(uint8_t flag, bool condition) {
  * from all parts of the emulator
  */
 uint8_t CPU::read(uint16_t address) const {
-    if (address >= 0x2000 && address < 0x4000) {
-        // Handle PPU registers
-        switch (address & 0x2007) {  // Mirror every 8 bytes
-        }
-    }
+  // PPU registers are mirrored every 8 bytes in 0x2000-0x3FFF
+  if (address >= 0x2000 && address < 0x4000) {
+    return ppu->read_register(address);
+  }
 
-    // Making sure the mapper is there
-    if (address >= 0x8000 && mapper) {
-        return mapper->read_cpu(address);
-    }
+  // Cartridge/mapper space
+  if (address >= 0x8000 && mapper) {
+      return mapper->read_cpu(address);
+  }
 
-    return system_memory[address];
+  return system_memory[address];
 }
+
 
 void CPU::write(uint16_t address, uint8_t value) { 
   if (address >= 0x2000 && address < 0x4000) {
-    
+    // mirrored every 8 bytes; PPU handles modulo
+    ppu->write_register(address, value);
     return;
-    //call ppu function
   }
+
+  if (address == 0x4014) { // OAM DMA
+    uint16_t base_addr = value << 8;
+    for (int i = 0; i < 256; i++) {
+      uint8_t byte = read((uint16_t)(base_addr + i));
+      ppu->oam_write(byte);
+    }
+    cycles += (cycles % 2 == 0) ? 513 : 514;
+    return;
+  }
+
   if (address >= 0x8000 && mapper) {
     mapper->write_cpu(address, value);
     return;
   }
+
   system_memory[address] = value; 
 }
 
+
 // Push a value onto the stack
 void CPU::push(uint8_t value) {
-  system_memory[0x100 + SP] = value;
-  SP--;  // Decrement SP after push
-  assert((0x100 + SP) >= 0x100);
+  // Stack is 0x0100 + SP, then SP--
+  uint16_t addr = 0x100 + SP;
+  assert(addr <= 0x1FF);
+  system_memory[addr] = value;
+  if (SP == 0) {
+    // Underflow case
+    SP = 0xFF;
+  } 
+  else {
+    SP--;
+  }
 }
 
 /* 
@@ -91,9 +119,17 @@ void CPU::push(uint8_t value) {
  * value 
  */
 uint8_t CPU::pop() {
-  SP++;  // increment SP on pop
-  assert((0x100 + SP) <= 0x1FF);
-  return system_memory[0x100 + SP];
+  // increment SP then read
+  if (SP == 0xFF) {
+    // Underflow/initial state
+    SP = 0;
+  } 
+  else {
+    SP++;
+  }
+  uint16_t addr = 0x100 + SP;
+  assert(addr <= 0x1FF);
+  return system_memory[addr];
 }
 
 
@@ -160,6 +196,16 @@ void CPU::loadROM(const std::string& filename) {
 
   file.close();
 }
+
+void CPU::nmi() {
+    push((PC >> 8) & 0xFF); // push high byte of PC
+    push(PC & 0xFF);        // push low byte of PC
+    push(P & ~FLAG_BREAK);  // push status register with B clear
+    set_flag(FLAG_INTERRUPT, true);
+    PC = read(0xFFFA) | (read(0xFFFB) << 8); // jump to NMI vector
+    cycles += 7;
+}
+
 
 uint8_t CPU::fetch() { //fetch 16 bits because opcode can go up to the 
   assert(system_memory);
@@ -486,13 +532,13 @@ void CPU::adc_immediate() {
 void CPU::adc_zeropage() {
   uint8_t address = read(PC);
   PC++;
-  uint8_t value = read(address); //this is only 8 bit (max 256) so no need to modulo to zero page
+  uint8_t value = read(address); // this is only 8 bit (max 256) so no need to modulo to zero page
 
   uint16_t result = A + value + ((P & FLAG_CARRY)? 1 : 0); // if C flag is on, add 1, else nothing
   set_flag(FLAG_CARRY, result > 0xFF);
   set_flag(FLAG_OVERFLOW, ((result ^ A) & (result ^ value) & 0x80)); //formula to check for negative/positive overflow
 
-  A = result & 0xFF; //since we had 16 bits, make sure it's 8 bit maske
+  A = result & 0xFF; //since we had 16 bits, make sure it's 8 bit mask
 
   //using A instead of result since we want the values to be masked to 8 bits
   set_flag(FLAG_ZERO, A == 0); 
@@ -2470,7 +2516,7 @@ void CPU::pha_implied() {
  */
 
 void CPU::php_implied() {
-    uint8_t copy = P | FLAG_BREAK; // set break flag in copy
+    uint8_t copy = P | FLAG_BREAK | FLAG_UNUSED; // set break flag in copy
     push(copy);
     cycles += 3;
 }

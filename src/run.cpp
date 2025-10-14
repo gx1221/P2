@@ -1,49 +1,27 @@
 #include "cpu.h"
-#include <iostream>
-#include <fstream>
-#include <iomanip>
+#include "ppu.h"
 
 int main() {
-    CPU cpu;
+    PPU ppu_placeholder(*(CPU*)nullptr); // temporary null CPU for init
+    CPU cpu(ppu_placeholder);
+    PPU ppu(cpu); // reassign CPU reference
+    cpu.loadROM("nestest.nes");
 
-    // Initialize all opcodes
-    cpu.init_opcode_table();
+    cpu.init_opcode_table(); // fill opcodes (or at least illegal instruction)
 
-    // Loading rom
-    cpu.loadROM("01-basics.nes");
+    while (true) {
+        cpu.step();     // execute 1 CPU instruction
 
-    // Open log file to write opcodes in
-    std::ofstream logFile("cpu_traces.log");
-    if (!logFile.is_open()) {
-        std::cerr << "Failed to open log file!\n";
-        return 1;
+        // Tick the PPU for enough cycles per CPU step
+        for (int i = 0; i < 3; ++i) // NES PPU runs 3x CPU cycles
+            ppu.tick();
+
+        // Check for NMI
+        if (ppu.getNMI()) {
+            ppu.setNMI(false);
+            cpu.nmi();
+        }
     }
 
-    const int max_cycles = 5000;
-    int steps = 0;
-
-    while (steps < max_cycles) {
-        uint16_t current_pc = cpu.get_PC();
-
-        // output status of all registers and PC to log file for testing
-        uint8_t next_byte = cpu.read(current_pc + 1);
-        logFile << "PC=$" << std::hex << std::setfill('0') << std::setw(4) << current_pc
-            << "  OP=$" << std::setw(2) << (int)cpu.getCurrentOpcode()
-            << "  NEXT=$" << std::setw(2) << (int)next_byte
-            << "  X=$" << std::setw(2) << (int)cpu.get_X()
-            << "  Y=$" << std::setw(2) << (int)cpu.get_Y()
-            << "  A=$" << std::setw(2) << (int)cpu.get_A()
-            << "  P=$" << std::setw(2) << (int)cpu.get_P()
-            << "  SP=$" << std::setw(2) << (int)cpu.get_SP()
-            << "  CYC=" << std::dec << cpu.get_cycles()
-            << "\n";
-
-
-        cpu.step();
-        steps++;
-    }
-
-    logFile.close();
-    std::cout << "Program stopped.\n";
     return 0;
 }

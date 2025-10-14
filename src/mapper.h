@@ -17,7 +17,9 @@ public:
 class Mapper0 : public Mapper {
     std::vector<uint8_t> prgROM;
     std::vector<uint8_t> chrROM;
+    std::vector<uint8_t> nametables;
     bool vertical_mirror;
+    uint16_t mirrorAddress(uint16_t addr, bool verticalMirror);
 
 public:
     Mapper0(std::vector<uint8_t> prg, std::vector<uint8_t> chr, bool vertical);
