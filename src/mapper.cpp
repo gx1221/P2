@@ -5,6 +5,9 @@ Mapper0::Mapper0(std::vector<uint8_t> prg, std::vector<uint8_t> chr, bool vertic
 {
     // allocate 2KB for nametables (4 nametables * 1KB each mirrored)
     nametables.resize(0x800, 0);
+    if (chrROM.empty()) {
+        chrROM.resize(0x2000, 0);
+    }
 }
 
 uint8_t Mapper0::read_cpu(uint16_t addr) {
@@ -64,3 +67,4 @@ uint16_t Mapper0::mirrorAddress(uint16_t addr, bool verticalMirror) {
             return 0x400 + (addr % 0x400);
     }
 }
+

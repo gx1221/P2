@@ -1,12 +1,14 @@
 #include "ppu.h"
 #include "cpu.h"
+#include "input.h"
 
 /* Pixel processing unit (PPU) which runs independently of the CPU, 
 but still time-bound to the same timer and the APU */
 
-PPU::PPU(CPU* cpu_ref) : cpu(cpu_ref) {
+PPU::PPU() {
   write_latch = false;
   NMI = false;
+  frame_toggle = false;
   ppu_cycles = 0;
   scanline = 0;
 
@@ -19,6 +21,7 @@ PPU::PPU(CPU* cpu_ref) : cpu(cpu_ref) {
   t_addr = 0;
   buffer = 0;
   status = 0;
+  mapper = nullptr;
 
   memset(pattern_table, 0, sizeof(pattern_table));
   memset(name_tables,    0, sizeof(name_tables));
@@ -36,6 +39,14 @@ PPU::PPU(CPU* cpu_ref) : cpu(cpu_ref) {
 
 void PPU::connectCPU(CPU* cpu_ref) {
   cpu = cpu_ref;
+}
+
+void PPU::connectInput(Input* input_ref) {
+  input = input_ref;
+}
+
+void PPU::connectMapper(Mapper* mapper_ptr) {
+  mapper = mapper_ptr;
 }
 
 void PPU::write_register(uint16_t cpu_addr, uint8_t value) {
@@ -77,14 +88,13 @@ void PPU::write_register(uint16_t cpu_addr, uint8_t value) {
       break;
     case 7: // $2007 - PPUDATA
       // write to VRAM
-      Mapper& mapper = cpu->get_mapper();
 
       if (vram_addr < 0x2000) {
           // Pattern table write
-          mapper.write_ppu(vram_addr, value);
+          mapper->write_ppu(vram_addr, value);
       } else if (vram_addr >= 0x2000 && vram_addr < 0x3F00) {
           // Nametable write
-          mapper.write_ppu(vram_addr, value);
+          mapper->write_ppu(vram_addr, value);
       } else if (vram_addr >= 0x3F00 && vram_addr < 0x4000) {
           // Palette RAM write (handled internally)
           palette_RAM[(vram_addr - 0x3F00) % 32] = value;
@@ -98,7 +108,6 @@ void PPU::write_register(uint16_t cpu_addr, uint8_t value) {
 
 uint8_t PPU::read_register(uint16_t cpu_addr) {
     uint8_t data = 0;
-    Mapper& mapper = cpu->get_mapper();
     switch (cpu_addr % 8) {
         case 2: // $2002 - PPUSTATUS
             data = status;
@@ -112,7 +121,7 @@ uint8_t PPU::read_register(uint16_t cpu_addr) {
             if (vram_addr < 0x3F00) {
                 // buffered read for VRAM
                 data = buffer;
-                buffer = mapper.read_ppu(vram_addr);
+                buffer = mapper->read_ppu(vram_addr);
             } else {
                 // direct palette read
                 data = palette_RAM[(vram_addr - 0x3F00) % 32];
@@ -156,64 +165,71 @@ void PPU::tick() {
 }
 
 void PPU::render() {
+  // Make sure that pixels outside visible area aren't rendered
   if (scanline >= 240 || ppu_cycles < 1 || ppu_cycles > 256) {
     return;
   }
 
-  int x = ppu_cycles - 1;
-  int y = scanline;
+  int x = ppu_cycles - 1; // 0 - 255
+  int y = scanline; // 0 - 239
 
-  Mapper& mapper = cpu->get_mapper();
 
-  // Rendering background
-  int tile_x = x / 8;
+  // Rendering background section
+
+  // starting positions of every tile
+  int tile_x = x / 8;  
   int tile_y = y / 8;
 
   uint16_t name_index = tile_y * 32 + tile_x;
   uint16_t nt_addr = 0x2000 + (name_index % 0x400);
-  uint8_t tile_number = mapper.read_ppu(nt_addr);
+  uint8_t tile_number = mapper->read_ppu(nt_addr);
 
+  // Get tile data and tile row info
   uint16_t tile_addr = tile_number * 16 + (y % 8);
-  uint8_t low  = mapper.read_ppu(tile_addr);
-  uint8_t high = mapper.read_ppu(tile_addr + 8);
+  uint8_t low  = mapper->read_ppu(tile_addr);
+  uint8_t high = mapper->read_ppu(tile_addr + 8);
 
+  // Get pixel info inside of tile row
   int pixel_x = x % 8;
   uint8_t bit0 = (low  >> (7 - pixel_x)) & 1;
   uint8_t bit1 = (high >> (7 - pixel_x)) & 1;
-  uint8_t color_index = (bit1 << 1) | bit0;
+  uint8_t color_index = (bit1 << 1) | bit0; //get 2-bit color data
 
-  uint32_t color = 0xFF000000;
+  uint32_t color = 0xFF000000; // Initialize to black
+
+  // map color
   if (color_index != 0) {
-      uint8_t palette_entry = mapper.read_ppu(0x3F00 + color_index);
+      uint8_t palette_entry = mapper->read_ppu(0x3F00 + color_index);
       color = nesColor(palette_entry);
   }
 
-  framebuffer[y][x] = color;
+  framebuffer[y][x] = color; //actually draw the color
 
   // Rendering sprites
   for (int sprite = 0; sprite < 64; sprite++) {
-      uint8_t sprite_y = OAM[sprite * 4 + 0];
-      uint8_t tile = OAM[sprite * 4 + 1];
-      uint8_t attr = OAM[sprite * 4 + 2];
-      uint8_t sprite_x = OAM[sprite * 4 + 3];
+      uint8_t sprite_y = OAM[sprite * 4 + 0]; // y position
+      uint8_t tile = OAM[sprite * 4 + 1]; // pattern table index
+      uint8_t attr = OAM[sprite * 4 + 2]; // attribute
+      uint8_t sprite_x = OAM[sprite * 4 + 3]; // x position
 
       // Check if this pixel is inside the sprite
       if (y >= sprite_y && y < sprite_y + 8 && x >= sprite_x && x < sprite_x + 8) {
           int sx = x - sprite_x;
           int sy = y - sprite_y;
 
+          // Get tile data for sprite
           uint16_t tile_addr = tile * 16 + sy;
-          uint8_t low  = mapper.read_ppu(tile_addr);
-          uint8_t high = mapper.read_ppu(tile_addr + 8);
+          uint8_t low  = mapper->read_ppu(tile_addr);
+          uint8_t high = mapper->read_ppu(tile_addr + 8);
 
           uint8_t bit0 = (low  >> (7 - sx)) & 1;
           uint8_t bit1 = (high >> (7 - sx)) & 1;
           uint8_t sprite_color_index = (bit1 << 1) | bit0;
 
           if (sprite_color_index != 0) {
-              // Sprite palette (0x3F10 - 0x3F1F)
-              uint8_t palette_entry = mapper.read_ppu(0x3F10 + (attr & 0x03) * 4 + sprite_color_index);
-              framebuffer[y][x] = nesColor(palette_entry);
+              // Select sprite palette index (0x3F10 - 0x3F1F)
+              uint8_t palette_entry = mapper->read_ppu(0x3F10 + (attr & 0x03) * 4 + sprite_color_index);
+              framebuffer[y][x] = nesColor(palette_entry); // Draw sprite pixel 
           }
       }
   }

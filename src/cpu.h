@@ -24,17 +24,17 @@
 
 
 class PPU; // forward declaration
+class Input;
 class CPU {
   public:
     PPU* ppu;
+    Input* input;
+    Mapper* mapper; 
 
-    CPU(PPU* ppu_ref);
+    CPU();
     void connectPPU(PPU*);
-
-
+    void connectInput(Input*);
     typedef void (*instruction_table)(void);
-
-
 
     //look up table to store all functions pointers
     void (CPU::*opcode_table[256])();
@@ -333,8 +333,6 @@ class CPU {
     bool bad_instruction;
 
     uint64_t cycles;
-    
-    Mapper* mapper; 
 
     uint8_t currentOpcode;  // store last fetched opcode
 };

@@ -1,7 +1,8 @@
 #include "cpu.h"
 #include "ppu.h"
+#include "input.h"
 
-CPU::CPU(PPU* ppu_ref) : ppu(ppu_ref) { //take in PPU reference and initalize it
+CPU::CPU() {
   A = 0x0;
   X = 0x0;
   Y = 0x0;
@@ -40,6 +41,10 @@ void CPU::connectPPU(PPU* ppu_ref) {
   ppu = ppu_ref;
 }
 
+void CPU::connectInput(Input* input_ref) {
+  input = input_ref;
+}
+
 /*
  * setting flag bits on or off based on
  * the flag macro constants
@@ -61,6 +66,22 @@ uint8_t CPU::read(uint16_t address) const {
   // PPU registers are mirrored every 8 bytes in 0x2000-0x3FFF
   if (address >= 0x2000 && address < 0x4000) {
     return ppu->read_register(address);
+  }
+
+  // Controller input 1
+  if (address == 0x4016) {
+    if (input) {
+      return input->read_controller1();
+    }
+    return 0x40; // default bus
+  }
+  
+  // Controller input 2
+  if (address == 0x4017) {
+    if (input) {
+      return input->read_controller2();
+    }
+    return 0x40;// default bus
   }
 
   // Cartridge/mapper space
@@ -86,6 +107,11 @@ void CPU::write(uint16_t address, uint8_t value) {
       ppu->oam_write(byte);
     }
     cycles += (cycles % 2 == 0) ? 513 : 514;
+    return;
+  }
+
+  if (address == 0x4016) { // Controller
+    input->write_strobe(value);
     return;
   }
 
@@ -159,6 +185,7 @@ void CPU::loadROM(const std::string& filename) {
 
   //combine into one 8-bit value
   uint8_t map = (high_map) | low_map;
+  printf("Detected mapper: %d (high: 0x%X, low: 0x%X)\n", map, high_map, low_map);
 
 
   //Prg-rom is where all the game's "program" is stored
@@ -184,16 +211,19 @@ void CPU::loadROM(const std::string& filename) {
   if (map == 0) {
       mapper = new Mapper0(prg_data, chr_data, vertical);
   }
-
-  // After everything is loaded and initialized, we can set the reset vector.
-  if (prg_size >= 0x8000) { // 32 KB PRG
-    reset_vector = prg_data[0x7FFC] | (prg_data[0x7FFD] << 8);
-  } 
-  else { // 16 KB PRG, mirrored
-    reset_vector = prg_data[0x3FFC] | (prg_data[0x3FFD] << 8);
+  else if (map == 1) {
+    mapper = new Mapper1(prg_data, chr_data, vertical);
   }
-  PC = reset_vector;
 
+    uint8_t lo = mapper->read_cpu(0xFFFC);
+    uint8_t hi = mapper->read_cpu(0xFFFD);
+    reset_vector = lo | (hi << 8);
+    PC = reset_vector;
+
+    
+    printf("Reset vector = $%04X\n", reset_vector);
+    printf("NMI vector   = $%02X%02X\n", mapper->read_cpu(0xFFFB), mapper->read_cpu(0xFFFA));
+    printf("IRQ vector   = $%02X%02X\n", mapper->read_cpu(0xFFFF), mapper->read_cpu(0xFFFE));
   file.close();
 }
 
@@ -211,12 +241,17 @@ uint8_t CPU::fetch() { //fetch 16 bits because opcode can go up to the
   assert(system_memory);
   assert(!bad_instruction);
   currentOpcode = CPU::read(PC);
+  if (!opcode_table[currentOpcode]) {
+        printf("Illegal opcode 0x%02X at PC=0x%04X\n", currentOpcode, PC);
+    }
   PC++; //read opcode, then increment PC
   //printf("Executing opcode: 0x%02X at PC=0x%04X\n", currentOpcode, PC);
   return currentOpcode;
 } 
 
+
 void CPU::step() {
+  bad_instruction = false;
   uint8_t opcode = fetch();         // fetch next opcode
   (this->*opcode_table[opcode])();  // call the member function
 }
@@ -283,7 +318,7 @@ void CPU::init_opcode_table() {
   opcode_table[0x10] = &CPU::bpl_relative;
 
   // BRK - Break
-  opcode_table[0x00] = &CPU::brk_implied;  //just going to use the implied version
+  opcode_table[0x00] = &CPU::brk_implied;
 
   // BVC - Branch if Overflow Clear
   opcode_table[0x50] = &CPU::bvc_relative;
@@ -1183,8 +1218,8 @@ void CPU::brk_immediate() {
 
   //get the address... Remember that you're pushing 8-bit values to memory
   
-  push((PC >> 8) & 0xFF);  //Push high byte
-  push(PC & 0xFF); //Push low byte
+  push(((PC + 1) >> 8) & 0xFF);  //Push high byte
+  push((PC + 1) & 0xFF); //Push low byte
 
   push((P | FLAG_BREAK));
 
@@ -1207,8 +1242,8 @@ void CPU::brk_implied() {
 
   //get the address... Remember that you're pushing 8-bit values to memory
   
-  push((PC >> 8) & 0xFF);  //Push high byte
-  push(PC & 0xFF); //Push low byte
+  push(((PC + 1) >> 8) & 0xFF);  //Push high byte
+  push((PC + 1) & 0xFF); //Push low byte
 
   push((P | FLAG_BREAK));
 

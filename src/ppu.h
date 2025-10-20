@@ -16,12 +16,17 @@
 #define OAMDMA 0x4014
 
 class CPU; // forward declaration
+class Input;
+class Mapper;
 class PPU
 {
 public:
+  PPU();
   CPU* cpu;
-  PPU(CPU*);
+  Input* input;
   void connectCPU(CPU*);
+  void connectInput(Input*);
+  void connectMapper(Mapper*);
   void write_register(uint16_t, uint8_t);
   uint8_t read_register(uint16_t);
   void oam_write(uint8_t);
@@ -51,14 +56,11 @@ Reading PPUDATA → return buffer, then refresh buffer = VRAM[vram_addr]; vram_a
     uint8_t scroll;      // $2005 - PPUSCROLL writes
     uint16_t vram_addr;  // $2006/2007 target address
     uint16_t t_addr;     // temporary VRAM address
-    bool write_latch;     // latch toggle for $2005/$2006
+    bool write_latch;    // latch toggle for $2005/$2006
     uint8_t buffer;      // read buffer for $2007
-    uint16_t ppu_cycles;
-    uint16_t scanline;
-    bool frame_toggle = false;
-
-
-
+    uint16_t ppu_cycles; // cycles of ppu - will be used to draw every pixel/cycle (1-256 pixels)
+    uint16_t scanline;   // current line being drawn 10-239 is user visible 240-260 is for other purposes
+    bool frame_toggle;   // toggle frame
     bool NMI; //non-maskable interrupt
 
 
@@ -82,6 +84,8 @@ Reading PPUDATA → return buffer, then refresh buffer = VRAM[vram_addr]; vram_a
    *  Byte 2 - Attributes (look in the wiki later)
    *  Byte 3 -  X position of left of sprite
    * */
+
+    Mapper* mapper;
 };
 
 
