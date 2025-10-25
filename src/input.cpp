@@ -38,14 +38,14 @@ void Input::write_strobe(uint8_t value) {
 }
 
 uint8_t Input::read_controller1() {
-    uint8_t ret = controller1.shift_reg & 1;
+    uint8_t return_value = controller1.shift_reg & 1;
     if (!controller1.strobe) controller1.shift_reg >>= 1;
-    return ret | 0x40;
+    return return_value | 0x40;
 }
 
 uint8_t Input::read_controller2() {
-    uint8_t ret = controller2.shift_reg & 1;
+    uint8_t return_value = controller2.shift_reg & 1;
     if (!controller2.strobe) controller2.shift_reg >>= 1;
-    return ret | 0x40;
+    return return_value | 0x40;
 }
 

@@ -63,6 +63,19 @@ void CPU::set_flag(uint8_t flag, bool condition) {
  * from all parts of the emulator
  */
 uint8_t CPU::read(uint16_t address) const {
+
+  if (address < 0x2000) {
+    return system_memory[address & 0x07FF];
+  }
+
+  if (address == 0x2002) {
+    uint8_t v = ppu->read_register(address);
+    static int c=0; if (c++ < 64) {
+        printf("$2002 read = %02X  (V=%d)\n", v, !!(v & 0x80));
+    }
+    return v;
+  }
+  
   // PPU registers are mirrored every 8 bytes in 0x2000-0x3FFF
   if (address >= 0x2000 && address < 0x4000) {
     return ppu->read_register(address);
@@ -84,6 +97,10 @@ uint8_t CPU::read(uint16_t address) const {
     return 0x40;// default bus
   }
 
+  if (address < 0x4020)  {
+    return 0x00;
+  }
+
   // Cartridge/mapper space
   if (address >= 0x8000 && mapper) {
       return mapper->read_cpu(address);
@@ -94,6 +111,11 @@ uint8_t CPU::read(uint16_t address) const {
 
 
 void CPU::write(uint16_t address, uint8_t value) { 
+
+  if (address < 0x2000) {
+     system_memory[address & 0x07FF] = value; return;
+  }
+
   if (address >= 0x2000 && address < 0x4000) {
     // mirrored every 8 bytes; PPU handles modulo
     ppu->write_register(address, value);
@@ -176,6 +198,8 @@ void CPU::loadROM(const std::string& filename) {
     printf("can't read header");
   }
   
+  printf("PRG banks=%d CHR banks=%d mapper=%02X\n", header[4], header[5],
+       (header[7] & 0xF0) | ((header[6] & 0xF0) >> 4));
   // take the 4 high and low nibbles at each flag
   // one byte -> 76543210
   // take first 4 bits each from the bytes in flags 6 and 7
@@ -199,11 +223,16 @@ void CPU::loadROM(const std::string& filename) {
   // Chr-rom is the place where the graphics will pull characters and sprites from
   // Chr is stored in $0000–$1FFF for PPU pattern table
   size_t chr_size = header.at(5) * 8192; // getting the total size of CHR ROM data
-  std::vector<uint8_t> chr_data(chr_size);
-  file.read(reinterpret_cast<char*>(chr_data.data()), chr_size);
-  if (!file) {
-    printf("can't read chrdata");
-  }
+
+  std::vector<uint8_t> chr_data;
+  if (chr_size > 0) {
+    chr_data.resize(chr_size);
+    file.read(reinterpret_cast<char*>(chr_data.data()), chr_size);
+    if (!file) {
+      printf("can't read chrdata (expected %zu bytes)\n", chr_size);
+      return;
+    }
+}
 
   // look at whether the mirroring is vertical or horizontal
   bool vertical = (header.at(6) & 0x01) != 0;
@@ -245,7 +274,9 @@ uint8_t CPU::fetch() { //fetch 16 bits because opcode can go up to the
         printf("Illegal opcode 0x%02X at PC=0x%04X\n", currentOpcode, PC);
     }
   PC++; //read opcode, then increment PC
-  //printf("Executing opcode: 0x%02X at PC=0x%04X\n", currentOpcode, PC);
+  if (cycles % 100000 == 0){
+  printf("Executing opcode: 0x%02X at PC=0x%04X\n", currentOpcode, PC);
+  }
   return currentOpcode;
 } 
 
@@ -556,10 +587,10 @@ void CPU::adc_immediate() {
   set_flag(FLAG_OVERFLOW, ((result ^ A) & (result ^ value) & 0x80)); //formula to check for negative/positive overflow
 
   A = result & 0xFF; //since we had 16 bits, we want to go back to 8 bits since A is 8 bits
-
+  
   //using A instead of result since we want the values to be masked to 8 bits and not 16 from the result.
   set_flag(FLAG_ZERO, A == 0); 
-  set_flag(FLAG_NEGATIVE,  A & 0x80); // check if 7th (Negative) bit is on. also a true bool is any non-zero value
+  set_flag(FLAG_NEGATIVE,  (A & 0x80) != 0); // check if 7th (Negative) bit is on. also a true bool is any non-zero value
   
   cycles += 2;
 }
@@ -577,7 +608,7 @@ void CPU::adc_zeropage() {
 
   //using A instead of result since we want the values to be masked to 8 bits
   set_flag(FLAG_ZERO, A == 0); 
-  set_flag(FLAG_NEGATIVE,  A & 0x80); // check if 7th (Negative) bit is on. also a true bool is any non-zero value
+  set_flag(FLAG_NEGATIVE,  (A & 0x80) != 0); // check if 7th (Negative) bit is on. also a true bool is any non-zero value
   
   cycles += 3;
 }
@@ -596,7 +627,7 @@ void CPU::adc_zeropage() {
 
     //using A instead of result since we want the values to be masked to 8 bits
     set_flag(FLAG_ZERO, A == 0); 
-    set_flag(FLAG_NEGATIVE,  A & 0x80); // check if 7th/last bit (Negative) bit is on. also a true bool is any non-zero value
+    set_flag(FLAG_NEGATIVE,  (A & 0x80) != 0); // check if 7th/last bit (Negative) bit is on. also a true bool is any non-zero value
     
     cycles += 4;
 }
@@ -618,7 +649,7 @@ void CPU::adc_absolute() {
   A = result & 0xFF;
 
   set_flag(FLAG_ZERO, A == 0);
-  set_flag(FLAG_NEGATIVE, A & 0x80);
+  set_flag(FLAG_NEGATIVE,  (A & 0x80) != 0);
 
   cycles += 4;
 }
@@ -647,7 +678,7 @@ void CPU::adc_absolute_x() {
   A = result & 0xFF;
 
   set_flag(FLAG_ZERO, A == 0);
-  set_flag(FLAG_NEGATIVE, A & 0x80);
+  set_flag(FLAG_NEGATIVE,  (A & 0x80) != 0);
 
   cycles += 4;
   
@@ -677,7 +708,7 @@ void CPU::adc_absolute_y() {
   A = result & 0xFF;
 
   set_flag(FLAG_ZERO, A == 0);
-  set_flag(FLAG_NEGATIVE, A & 0x80);
+  set_flag(FLAG_NEGATIVE,  (A & 0x80) != 0);
 
   cycles += 4;
   
@@ -701,7 +732,7 @@ void CPU::adc_indexed_indirect() {
   A = result & 0xFF;
 
   set_flag(FLAG_ZERO, A == 0);
-  set_flag(FLAG_NEGATIVE, A & 0x80);
+  set_flag(FLAG_NEGATIVE,  (A & 0x80) != 0);
 
   cycles += 6;
 }
@@ -731,7 +762,7 @@ void CPU::adc_indirect_indexed() {
   A = result & 0xFF;
 
   set_flag(FLAG_ZERO, A == 0);
-  set_flag(FLAG_NEGATIVE, A & 0x80);
+  set_flag(FLAG_NEGATIVE,  (A & 0x80) != 0);
 
   cycles += 5;
 }
@@ -777,8 +808,11 @@ void CPU::and_zeropage() {
 
 
 void CPU::and_zeropage_x() {
-  uint8_t base_address = read(PC);
-  uint8_t value = (base_address + X);
+  uint8_t base_address = read(PC); //get initial address
+  PC++;
+
+  uint8_t address = (base_address + X) & 0xFF; //add x to address then zero page
+  uint8_t value = read(address);
 
   A = (A & value) & 0xFF;
   set_flag(FLAG_ZERO, A == 0);
@@ -789,8 +823,9 @@ void CPU::and_zeropage_x() {
 void CPU::and_absolute() {
   uint8_t low = read(PC);
   uint8_t high = read(PC + 1);
-  
-  uint16_t address = (high << 8) | low;
+
+  PC += 2;
+  uint16_t address = (high << 8) | low; 
   uint8_t value = read(address);
 
   A = (A & value) & 0xFF;
@@ -1242,10 +1277,12 @@ void CPU::brk_implied() {
 
   //get the address... Remember that you're pushing 8-bit values to memory
   
-  push(((PC + 1) >> 8) & 0xFF);  //Push high byte
-  push((PC + 1) & 0xFF); //Push low byte
+  uint16_t return_val = (PC + 1);
 
-  push((P | FLAG_BREAK));
+  push((return_val >> 8) & 0xFF);  //Push high byte
+  push(return_val & 0xFF); //Push low byte
+
+  push((P | FLAG_BREAK | FLAG_UNUSED));
 
   set_flag(FLAG_INTERRUPT, true);
   
@@ -1253,7 +1290,6 @@ void CPU::brk_implied() {
   // in 0xFFFE and 0xFFFF.
   uint8_t low = read(0xFFFE);
   uint8_t high = read(0xFFFF);
-
   
   PC = (high << 8) | low;
 
@@ -2070,6 +2106,21 @@ void CPU::lda_zeropage_x() {
   set_flag(FLAG_NEGATIVE, (A & FLAG_NEGATIVE));
   cycles += 4;
 }
+
+// Making zero page y for testing purposes
+void CPU::lda_zeropage_y() {
+  uint8_t base_address = read(PC); //get initial address
+  PC++;
+
+  uint8_t address = (base_address + Y) & 0xFF; //add y to address then zero page
+  uint8_t value = read(address);
+  A = value;
+
+  set_flag(FLAG_ZERO, A == 0);
+  set_flag(FLAG_NEGATIVE, (A & FLAG_NEGATIVE));
+  cycles += 4;
+}
+
 void CPU::lda_absolute() {
   uint8_t low = read(PC);  // first byte of address
   uint8_t high = read(PC + 1); // second byte of address
@@ -2088,9 +2139,13 @@ void CPU::lda_absolute_x() {
   uint8_t low = read(PC); //read two bytes on pc
   uint8_t high = read(PC + 1); 
   PC += 2;
+
   uint16_t address = (high << 8) | low; 
+
   // Page cross
   if ((address & 0xFF00) != ((address + X) & 0xFF00)) { //checking if first byte is the same as original after adding
+    uint16_t dummy_address = ((address & 0xFF00) | ((low + X) & 0xFF));
+    read(dummy_address); // I guess I still have to actually read the dummy address on abs_x
     cycles += 1; 
   }
   address += X;
@@ -2101,6 +2156,7 @@ void CPU::lda_absolute_x() {
   set_flag(FLAG_NEGATIVE, (A & FLAG_NEGATIVE));
   cycles += 4;
 }
+
 void CPU::lda_absolute_y() {
   uint8_t low = read(PC); //read two bytes on pc
   uint8_t high = read(PC + 1); 
@@ -2847,13 +2903,15 @@ void CPU::sbc_immediate() {
   uint8_t value = read(PC);
   PC++;
 
-  uint16_t temp = A + (~value) + (P & FLAG_CARRY ? 1 : 0); //need this to be exactly 1 when adding
-  set_flag(FLAG_CARRY, temp > 0xFF); 
-  set_flag(FLAG_ZERO, (uint8_t)temp == 0);
-  set_flag(FLAG_OVERFLOW, ((A ^ temp) & (A ^ ~value) & 0x80));
-  set_flag(FLAG_NEGATIVE, (temp & 0x80));
+  uint16_t carry_in = (P & FLAG_CARRY) ? 1 : 0;
+  uint16_t temp = (uint16_t)A + (uint16_t)(~value & 0xFF) + carry_in;
+  uint8_t result = (uint8_t)temp;
+  set_flag(FLAG_CARRY, (temp & 0x100) != 0);
+  set_flag(FLAG_ZERO, result == 0);
+  set_flag(FLAG_OVERFLOW, (((A ^ result) & ((~value ^ result) & 0xFF)) & 0x80) != 0);
+  set_flag(FLAG_NEGATIVE, (result & 0x80) != 0);
+  A = result;
 
-  A = (uint8_t)temp;
   cycles += 2;
 }
 
@@ -2862,11 +2920,14 @@ void CPU::sbc_zeropage() {
   PC++;
   
   uint8_t value = read(address);
-  uint16_t temp = A + (~value) + (P & FLAG_CARRY ? 1 : 0); 
-  set_flag(FLAG_CARRY, temp > 0xFF); 
-  set_flag(FLAG_ZERO, (uint8_t)temp == 0);
-  set_flag(FLAG_OVERFLOW, ((A ^ temp) & (A ^ ~value) & 0x80));
-  set_flag(FLAG_NEGATIVE, (temp & FLAG_NEGATIVE));
+  uint16_t carry_in = (P & FLAG_CARRY) ? 1 : 0;
+  uint16_t temp = (uint16_t)A + (uint16_t)(~value & 0xFF) + carry_in;
+  uint8_t result = (uint8_t)temp;
+  set_flag(FLAG_CARRY, (temp & 0x100) != 0);
+  set_flag(FLAG_ZERO, result == 0);
+  set_flag(FLAG_OVERFLOW, (((A ^ result) & ((~value ^ result) & 0xFF)) & 0x80) != 0);
+  set_flag(FLAG_NEGATIVE, (result & 0x80) != 0);
+  A = result;
 
   A = (uint8_t)temp;
   cycles += 3;
@@ -2877,13 +2938,14 @@ void CPU::sbc_zeropage_x() {
 
   uint8_t address = (base_address + X) & 0xFF; 
   uint8_t value = read(address);
-  uint16_t temp = A + (~value) + (P & FLAG_CARRY ? 1 : 0); 
-  set_flag(FLAG_CARRY, temp > 0xFF); 
-  set_flag(FLAG_ZERO, (uint8_t)temp == 0);
-  set_flag(FLAG_OVERFLOW, ((A ^ temp) & (A ^ ~value) & 0x80));
-  set_flag(FLAG_NEGATIVE, (temp & FLAG_NEGATIVE));
-
-  A = (uint8_t)temp;
+  uint16_t carry_in = (P & FLAG_CARRY) ? 1 : 0;
+  uint16_t temp = (uint16_t)A + (uint16_t)(~value & 0xFF) + carry_in;
+  uint8_t result = (uint8_t)temp;
+  set_flag(FLAG_CARRY, (temp & 0x100) != 0);
+  set_flag(FLAG_ZERO, result == 0);
+  set_flag(FLAG_OVERFLOW, (((A ^ result) & ((~value ^ result) & 0xFF)) & 0x80) != 0);
+  set_flag(FLAG_NEGATIVE, (result & 0x80) != 0);
+  A = result;
 
   cycles += 4;
 
@@ -2895,13 +2957,15 @@ void CPU::sbc_absolute() {
   PC += 2;
   uint16_t address = (high << 8) | low; 
   uint8_t value = read(address);
-  uint16_t temp = A + (~value) + (P & FLAG_CARRY ? 1 : 0); 
-  set_flag(FLAG_CARRY, temp > 0xFF); 
-  set_flag(FLAG_ZERO, (uint8_t)temp == 0);
-  set_flag(FLAG_OVERFLOW, ((A ^ temp) & (A ^ ~value) & 0x80));
-  set_flag(FLAG_NEGATIVE, (temp & FLAG_NEGATIVE));
+  uint16_t carry_in = (P & FLAG_CARRY) ? 1 : 0;
+  uint16_t temp = (uint16_t)A + (uint16_t)(~value & 0xFF) + carry_in;
+  uint8_t result = (uint8_t)temp;
+  set_flag(FLAG_CARRY, (temp & 0x100) != 0);
+  set_flag(FLAG_ZERO, result == 0);
+  set_flag(FLAG_OVERFLOW, (((A ^ result) & ((~value ^ result) & 0xFF)) & 0x80) != 0);
+  set_flag(FLAG_NEGATIVE, (result & 0x80) != 0);
+  A = result;
 
-  A = (uint8_t)temp;
   cycles += 4;
 }
 void CPU::sbc_absolute_x() {
@@ -2915,13 +2979,16 @@ void CPU::sbc_absolute_x() {
   }
   address += X;
   uint8_t value = read(address);
-  uint16_t temp = A + (~value) + (P & FLAG_CARRY ? 1 : 0); 
-  set_flag(FLAG_CARRY, temp > 0xFF); 
-  set_flag(FLAG_ZERO, (uint8_t)temp == 0);
-  set_flag(FLAG_OVERFLOW, ((A ^ temp) & (A ^ ~value) & 0x80));
-  set_flag(FLAG_NEGATIVE, (temp & FLAG_NEGATIVE));
+  uint16_t carry_in = (P & FLAG_CARRY) ? 1 : 0;
+  uint16_t temp = (uint16_t)A + (uint16_t)(~value & 0xFF) + carry_in;
+  uint8_t result = (uint8_t)temp;
+  set_flag(FLAG_CARRY, (temp & 0x100) != 0);
+  set_flag(FLAG_ZERO, result == 0);
+  set_flag(FLAG_OVERFLOW, (((A ^ result) & ((~value ^ result) & 0xFF)) & 0x80) != 0);
+  set_flag(FLAG_NEGATIVE, (result & 0x80) != 0);
+  
+  A = result;
 
-  A = (uint8_t)temp;
   cycles += 4;
 }
 void CPU::sbc_absolute_y() {
@@ -2935,13 +3002,16 @@ void CPU::sbc_absolute_y() {
   }
   address += Y;
   uint8_t value = read(address);
-  uint16_t temp = A + (~value) + (P & FLAG_CARRY ? 1 : 0); 
-  set_flag(FLAG_CARRY, temp > 0xFF); 
-  set_flag(FLAG_ZERO, (uint8_t)temp == 0);
-  set_flag(FLAG_OVERFLOW, ((A ^ temp) & (A ^ ~value) & 0x80));
-  set_flag(FLAG_NEGATIVE, (temp & FLAG_NEGATIVE));
+  uint16_t carry_in = (P & FLAG_CARRY) ? 1 : 0;
+  uint16_t temp = (uint16_t)A + (uint16_t)(~value & 0xFF) + carry_in;
+  uint8_t result = (uint8_t)temp;
+  set_flag(FLAG_CARRY, (temp & 0x100) != 0);
+  set_flag(FLAG_ZERO, result == 0);
+  set_flag(FLAG_OVERFLOW, (((A ^ result) & ((~value ^ result) & 0xFF)) & 0x80) != 0);
+  set_flag(FLAG_NEGATIVE, (result & 0x80) != 0);
+  
+  A = result;
 
-  A = (uint8_t)temp;
   cycles += 4;
 }
 void CPU::sbc_indexed_indirect() {
@@ -2954,13 +3024,16 @@ void CPU::sbc_indexed_indirect() {
   uint16_t address = high << 8 | low;
 
   uint8_t value = read(address);
-  uint16_t temp = A + (~value) + (P & FLAG_CARRY ? 1 : 0); 
-  set_flag(FLAG_CARRY, temp > 0xFF); 
-  set_flag(FLAG_ZERO, (uint8_t)temp == 0);
-  set_flag(FLAG_OVERFLOW, ((A ^ temp) & (A ^ ~value) & 0x80));
-  set_flag(FLAG_NEGATIVE, (temp & FLAG_NEGATIVE));
-
-  A = (uint8_t)temp;
+  uint16_t carry_in = (P & FLAG_CARRY) ? 1 : 0;
+  uint16_t temp = (uint16_t)A + (uint16_t)(~value & 0xFF) + carry_in;
+  uint8_t result = (uint8_t)temp;
+  set_flag(FLAG_CARRY, (temp & 0x100) != 0);
+  set_flag(FLAG_ZERO, result == 0);
+  set_flag(FLAG_OVERFLOW, (((A ^ result) & ((~value ^ result) & 0xFF)) & 0x80) != 0);
+  set_flag(FLAG_NEGATIVE, (result & 0x80) != 0);
+  
+  A = result;
+  
   cycles += 6;
 }
 void CPU::sbc_indirect_indexed() {
@@ -2977,13 +3050,15 @@ void CPU::sbc_indirect_indexed() {
   }
 
   uint8_t value = read(address);
-  uint16_t temp = A + (~value) + (P & FLAG_CARRY ? 1 : 0); 
-  set_flag(FLAG_CARRY, temp > 0xFF); 
-  set_flag(FLAG_ZERO, (uint8_t)temp == 0);
-  set_flag(FLAG_OVERFLOW, ((A ^ temp) & (A ^ ~value) & 0x80));
-  set_flag(FLAG_NEGATIVE, (temp & FLAG_NEGATIVE));
-
-  A = (uint8_t)temp;
+  uint16_t carry_in = (P & FLAG_CARRY) ? 1 : 0;
+  uint16_t temp = (uint16_t)A + (uint16_t)(~value & 0xFF) + carry_in;
+  uint8_t result = (uint8_t)temp;
+  set_flag(FLAG_CARRY, (temp & 0x100) != 0);
+  set_flag(FLAG_ZERO, result == 0);
+  set_flag(FLAG_OVERFLOW, (((A ^ result) & ((~value ^ result) & 0xFF)) & 0x80) != 0);
+  set_flag(FLAG_NEGATIVE, (result & 0x80) != 0);
+  
+  A = result;
 
   cycles += 5;
 }
@@ -3072,6 +3147,8 @@ void CPU::sta_absolute_x() {
   uint16_t address = (high << 8) | low; 
   // Page cross
   if ((address & 0xFF00) != ((address + X) & 0xFF00)) { //checking if first byte is the same as original after adding
+    uint16_t dummy_address = ((address & 0xFF00) | ((low + X) & 0xFF));
+    read(dummy_address); // I guess I still have to actually read the dummy address on abs_x
     cycles += 1; 
   }
   address += X;

@@ -1,127 +1,113 @@
-#include "mapper.h"
+#pragma once
+#include <cstdlib>
+#include <stdint.h>
+#include <vector>
+#include <cstdio>
 
-Mapper0::Mapper0(std::vector<uint8_t> prg, std::vector<uint8_t> chr, bool vertical)
-    : prgROM(prg), chrROM(chr), vertical_mirror(vertical) 
-{
-    // allocate 2KB for nametables (4 nametables * 1KB each mirrored)
-    nametables.resize(0x800, 0);
-    if (chrROM.empty()) {
-        chrROM.resize(0x2000, 0);
+class Mapper {
+public:
+    virtual uint8_t read_cpu(uint16_t addr) = 0;
+    virtual void write_cpu(uint16_t addr, uint8_t data) = 0;
+    virtual uint8_t read_ppu(uint16_t addr) = 0;
+    virtual void write_ppu(uint16_t addr, uint8_t data) = 0;
+    virtual ~Mapper() = default;
+};
+
+// Mapper0 / NROM subclass
+class Mapper0 : public Mapper {
+    std::vector<uint8_t> prgROM;
+    std::vector<uint8_t> chrROM;
+    std::vector<uint8_t> nametables;
+    bool vertical_mirror;
+    uint16_t mirrorAddress(uint16_t addr, bool verticalMirror);
+
+public:
+    Mapper0(std::vector<uint8_t> prg, std::vector<uint8_t> chr, bool vertical);
+    uint8_t read_cpu(uint16_t addr) override;
+    void write_cpu(uint16_t addr, uint8_t data) override;
+    uint8_t read_ppu(uint16_t addr) override;
+    void write_ppu(uint16_t addr, uint8_t data) override;
+};
+
+class Mapper1 : public Mapper {
+    std::vector<uint8_t> prgROM;
+    std::vector<uint8_t> chrROM;
+    std::vector<uint8_t> palette;
+    std::vector<uint8_t> prgRAM;
+    std::vector<uint8_t> chrRAM; 
+    std::vector<uint8_t> nametables;
+
+    uint8_t shift_reg = 0x10;
+    uint8_t write_count = 0;
+    uint8_t control = 0x0C;
+    uint8_t chr_bank0 = 0;
+    uint8_t chr_bank1 = 0;
+    uint8_t prg_bank = 0;
+    uint8_t prg_bank_low = 0;
+    uint8_t prg_bank_high = 0;
+
+    bool vertical_mirror;
+    bool prg_ram_enable;
+    bool has_chr_ram = false;
+
+
+    void update_banks() {
+    uint8_t prg_mode = (control >> 2) & 0x03;
+    //uint8_t chr_mode = (control >> 4) & 0x01;
+    size_t num_banks = prgROM.size() / 0x4000;
+
+    // PRG banking
+    switch (prg_mode) {
+        case 0: // 32 KB mode
+        case 1:
+            prg_bank_low = (prg_bank & 0xFE) % num_banks;
+            prg_bank_high = prg_bank_low + 1;
+            break;
+
+        case 2: // fix first bank at $8000
+            prg_bank_low = 0;
+            prg_bank_high = prg_bank % num_banks;
+            break;
+
+        case 3: // switch $8000-$BFFF, fix last bank at $C000
+            prg_bank_low = prg_bank % num_banks; 
+            prg_bank_high = num_banks - 1;        
+            break;
     }
+
+    // debug statement. I'll leave it here
+
+   /* printf("[Mapper1] Control=%02X, PRG low=%d, PRG high=%d, CHR0=%d, CHR1=%d, PRG mode=%d, CHR mode=%d\n",
+           control, prg_bank_low, prg_bank_high, chr_bank0, chr_bank1, prg_mode, chr_mode);*/
 }
 
-uint8_t Mapper0::read_cpu(uint16_t addr) {
-    if (addr >= 0x8000) {
-        if (prgROM.size() == 0x4000) 
-            return prgROM[(addr - 0x8000) % 0x4000];
-        else
-            return prgROM[addr - 0x8000];
-    }
-    return 0;
-}
-
-void Mapper0::write_cpu(uint16_t addr, uint8_t data) {
-    (void)addr;
-    (void)data;
-}
-
-uint8_t Mapper0::read_ppu(uint16_t addr) {
-    if (addr < 0x2000) {
-        // CHR ROM/RAM
-        return chrROM[addr];
-    } else if (addr >= 0x2000 && addr < 0x3000) {
-        // nametable reads with mirroring
-        uint16_t mirrored = mirrorAddress(addr, vertical_mirror);
-        return nametables[mirrored];
-    } else if (addr >= 0x3000 && addr < 0x3F00) {
-        // mirrors of nametables
-        uint16_t mirrored = mirrorAddress(0x2000 + ((addr - 0x3000) % 0x1000), vertical_mirror);
-        return nametables[mirrored];
-    }
-    return 0;
-}
-
-void Mapper0::write_ppu(uint16_t addr, uint8_t data) {
-    if (addr < 0x2000 && !chrROM.empty()) {
-        // CHR-RAM
-        chrROM[addr] = data;
-    } else if (addr >= 0x2000 && addr < 0x3000) {
-        // nametable write with mirroring
-        uint16_t mirrored = mirrorAddress(addr, vertical_mirror);
-        nametables[mirrored] = data;
-    } else if (addr >= 0x3000 && addr < 0x3F00) {
-        // mirrored nametable write
-        uint16_t mirrored = mirrorAddress(0x2000 + ((addr - 0x3000) % 0x1000), vertical_mirror);
-        nametables[mirrored] = data;
-    }
-}
-
-uint16_t Mapper0::mirrorAddress(uint16_t addr, bool verticalMirror) {
-    addr = addr & 0x0FFF; // wrap to $2000-$2FFF
-    if (verticalMirror) { 
-        return addr % 0x800; // vertical mirroring
-    } else {
-        if (addr < 0x0800 || (addr >= 0x1000 && addr < 0x1800))
-            return addr % 0x400;
-        else
-            return 0x400 + (addr % 0x400);
-    }
-}
-
-
-
-
-
-
-    void Mapper1::update_banks() {
-        uint8_t prg_mode = (control >> 2) & 0x03;
-        size_t num_banks = prgROM.size() / 0x4000;
-        if (!num_banks) {
-            prg_bank_low = prg_bank_high = 0; 
-            return;
-        }
-
-        switch (prg_mode) {
-            case 0: 
-            case 1: {
-                uint8_t even = (uint8_t)((prg_bank & 0xFE) % num_banks);
-                prg_bank_low  = even;
-                prg_bank_high = (uint8_t)((even + 1) % num_banks);
-            } break;
-            case 2:
-                prg_bank_low  = 0;
-                prg_bank_high = (uint8_t)(prg_bank % num_banks);
-                break;
-            case 3:
-                prg_bank_low  = (uint8_t)(prg_bank % num_banks);
-                prg_bank_high = (uint8_t)(num_banks - 1);
-                break;
-        }
-    }
 
     // returns offset into nametables vector (0..0x7FF)
-    uint16_t Mapper1::mirrorAddress(uint16_t addr) {
+    uint16_t mirrorAddress(uint16_t addr) {
+        // normalize to 0..0xFFF for the 4 nametables (0x2000..0x2FFF -> 0..0xFFF)
         uint16_t a = addr & 0x0FFF;
-        uint16_t nametable_index = (a / 0x400) & 0x03;
-        uint16_t index = a % 0x400; 
-        uint8_t mode = control & 0x03; 
+        uint16_t nt_index = (a / 0x400) & 0x03; // which nametable 0..3
+        uint16_t index = a % 0x400; // offset inside that nametable
+        uint8_t mode = control & 0x03; // mirroring bits
+
         switch (mode) {
             case 0: // lower bank
                 return index;
             case 1: // higher bank
                 return 0x400 + index;      
             case 2: // vertical: NT0, NT1, NT0, NT1
-                if (nametable_index == 0 || nametable_index == 2) return index;
+                if (nt_index == 0 || nt_index == 2) return index;
                 else return 0x400 + index;
             case 3: // horizontal: NT0, NT0, NT1 , NT1
-                if (nametable_index == 0 || nametable_index == 1) return index;
+                if (nt_index == 0 || nt_index == 1) return index;
                 else return 0x400 + index;
         }
         return index;
     }
 
 
-    Mapper1::Mapper1(std::vector<uint8_t> prg, std::vector<uint8_t> chr, bool vertical)
+public:
+    Mapper1(std::vector<uint8_t> prg, std::vector<uint8_t> chr, bool vertical)
         : prgROM(prg), chrROM(chr), vertical_mirror(vertical) {
         nametables.resize(0x800, 0);
         palette.resize(32, 0);
@@ -131,16 +117,16 @@ uint16_t Mapper0::mirrorAddress(uint16_t addr, bool verticalMirror) {
         control = 0x0C;
         prg_ram_enable = true;
         prg_bank_high = (prgROM.size() / 0x4000) - 1;
-        if (chrROM.empty()) {
-          chrRAM.resize(0x2000, 0);
+        has_chr_ram = chrROM.empty();              
+        if (has_chr_ram) {
+            chrRAM.resize(0x2000, 0);
         }
         
         update_banks();
     }
 
-    uint8_t Mapper1::read_cpu(uint16_t addr) {
+    uint8_t read_cpu(uint16_t addr) override {
         if (addr >= 0x6000 && addr < 0x8000) {
-            printf("[PRG-RAM R] %04X -> %02X\n", addr, prgRAM[addr-0x6000]);
             return prgRAM[addr - 0x6000];
         }
         if (addr < 0x8000) {
@@ -163,7 +149,7 @@ uint16_t Mapper0::mirrorAddress(uint16_t addr, bool verticalMirror) {
     }
 
 
-    void Mapper1::write_cpu(uint16_t addr, uint8_t data) {
+    void write_cpu(uint16_t addr, uint8_t data) override {
         
         if (addr >= 0x6000 && addr < 0x8000) {
             if (prg_ram_enable) {
@@ -213,11 +199,10 @@ uint16_t Mapper0::mirrorAddress(uint16_t addr, bool verticalMirror) {
         }
     }
 
-    uint8_t Mapper1::read_ppu(uint16_t addr) {
+    uint8_t read_ppu(uint16_t addr) override {
         addr &= 0x3FFF; // PPU address space mirrors every 0x4000
 
         if (addr < 0x2000) {
-            
             uint8_t chr_mode = (control >> 4) & 1;
             if (chrROM.empty()) {
                 return chrRAM[addr & 0x1FFF];
@@ -254,7 +239,7 @@ uint16_t Mapper0::mirrorAddress(uint16_t addr, bool verticalMirror) {
 
 
 
-    void Mapper1::write_ppu(uint16_t addr, uint8_t data) {
+    void write_ppu(uint16_t addr, uint8_t data) override {
         addr &= 0x3FFF; // mirroring
 
         if (addr < 0x2000) {
@@ -272,4 +257,4 @@ uint16_t Mapper0::mirrorAddress(uint16_t addr, bool verticalMirror) {
         }
     }
 
-
+};

@@ -171,6 +171,7 @@ class CPU {
     void lda_immediate();
     void lda_zeropage();
     void lda_zeropage_x();
+    void lda_zeropage_y();
     void lda_absolute();
     void lda_absolute_x();
     void lda_absolute_y();
