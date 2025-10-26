@@ -70,9 +70,6 @@ uint8_t CPU::read(uint16_t address) const {
 
   if (address == 0x2002) {
     uint8_t v = ppu->read_register(address);
-    static int c=0; if (c++ < 64) {
-        printf("$2002 read = %02X  (V=%d)\n", v, !!(v & 0x80));
-    }
     return v;
   }
   
@@ -273,10 +270,7 @@ uint8_t CPU::fetch() { //fetch 16 bits because opcode can go up to the
   if (!opcode_table[currentOpcode]) {
         printf("Illegal opcode 0x%02X at PC=0x%04X\n", currentOpcode, PC);
     }
-  PC++; //read opcode, then increment PC
-  if (cycles % 100000 == 0){
-  printf("Executing opcode: 0x%02X at PC=0x%04X\n", currentOpcode, PC);
-  }
+  PC++;
   return currentOpcode;
 } 
 

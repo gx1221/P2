@@ -9,9 +9,6 @@ SRCS = src/cpu.cpp src/mapper.cpp src/ppu.cpp src/apu.cpp src/input.cpp
 lazy: src/test.cpp
 	$(CXX) $(CXXFLAGS) $< $(SRCS) -o test $(LDFLAGS) && ./test
 
-lazy2: src/test2.cpp
-	$(CXX) $(CXXFLAGS) $< $(SRCS) -o test $(LDFLAGS) && ./test
-
 debug: src/test.cpp
 	$(CXX) $(CXXFLAGS) $< $(SRCS) -o debug $(LDFLAGS)
 	@echo "Running under gdb..."

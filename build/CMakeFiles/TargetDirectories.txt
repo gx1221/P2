@@ -1,0 +1,4 @@
+/mnt/c/Users/xgeor.LAPTOP-H9NK9GKP/OneDrive/Desktop/Personal Projects/NES/build/CMakeFiles/test.dir
+/mnt/c/Users/xgeor.LAPTOP-H9NK9GKP/OneDrive/Desktop/Personal Projects/NES/build/CMakeFiles/run.dir
+/mnt/c/Users/xgeor.LAPTOP-H9NK9GKP/OneDrive/Desktop/Personal Projects/NES/build/CMakeFiles/edit_cache.dir
+/mnt/c/Users/xgeor.LAPTOP-H9NK9GKP/OneDrive/Desktop/Personal Projects/NES/build/CMakeFiles/rebuild_cache.dir
