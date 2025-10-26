@@ -213,44 +213,55 @@ uint16_t Mapper0::mirrorAddress(uint16_t addr, bool verticalMirror) {
         }
     }
 
-    uint8_t Mapper1::read_ppu(uint16_t addr) {
-        addr &= 0x3FFF; // PPU address space mirrors every 0x4000
+uint8_t Mapper1::read_ppu(uint16_t addr) {
+    addr &= 0x3FFF;
 
-        if (addr < 0x2000) {
-            
-            uint8_t chr_mode = (control >> 4) & 1;
-            if (chrROM.empty()) {
-                return chrRAM[addr & 0x1FFF];
+    if (addr < 0x2000) {
+        const uint8_t chr_mode = (control >> 4) & 1;
+
+        // CHR-RAM cart?
+        if (chrROM.empty()) {
+            return chrRAM[addr & 0x1FFF];
+        }
+
+        const uint32_t chr_size = (uint32_t)chrROM.size();
+
+        if (chr_mode == 0) {
+            // -------- 8 KB CHR mode --------
+            // Use only chr_bank0; ignore bit 0; stride is 8 KB.
+            // # of 8 KB banks:
+            uint32_t num8 = chr_size >> 13;            // / 0x2000
+            if (num8 == 0) return 0;                   // safety
+
+            uint32_t bank8 = (chr_bank0 >> 1) % num8;  // even bank
+            uint32_t base  = bank8 << 13;              // * 0x2000
+            return chrROM[ base + (addr & 0x1FFF) ];
+        } else {
+            // -------- 4 KB CHR mode --------
+            // $0000-$0FFF from chr_bank0; $1000-$1FFF from chr_bank1
+            uint32_t num4 = chr_size >> 12;            // / 0x1000
+            if (num4 == 0) num4 = 1;                   // safety
+
+            if (addr < 0x1000) {
+                uint32_t b0   = (chr_bank0 & 0x1F) % num4;
+                uint32_t base = b0 << 12;              // * 0x1000
+                return chrROM[ base + (addr & 0x0FFF) ];
             } else {
-                if (chr_mode == 0) {
-                    // 8 KB mode
-                    uint32_t bank_index = (chr_bank0 & 0x1E);
-                    uint32_t bank_offset = bank_index * 0x1000; // bank_index counts in 4KB units
-                    uint32_t idx = (bank_offset + (addr & 0x1FFF)) % chrROM.size();
-                    return chrROM[idx];
-                } else {
-                    // 4 KB mode
-                    if (addr < 0x1000) {
-                        uint32_t bank_offset = (uint32_t)(chr_bank0 & 0x1F) * 0x1000;
-                        uint32_t idx = (bank_offset + (addr & 0x0FFF)) % chrROM.size();
-                        return chrROM[idx];
-                    } else {
-                        uint32_t bank_offset = (uint32_t)(chr_bank1 & 0x1F) * 0x1000;
-                        uint32_t idx = (bank_offset + (addr & 0x0FFF)) % chrROM.size();
-                        return chrROM[idx];
-                    }
-                }
+                uint32_t b1   = (chr_bank1 & 0x1F) % num4;
+                uint32_t base = b1 << 12;              // * 0x1000
+                return chrROM[ base + (addr & 0x0FFF) ];
             }
         }
-        else if (addr < 0x3F00) {
-            return nametables[mirrorAddress(addr)];
-        }
-        else {
-            uint16_t index = addr & 0x1F;         
-            if ((index & 0x03) == 0) index &= 0x0F;
-            return palette[index];
-        }
     }
+    else if (addr < 0x3F00) {
+        return nametables[ mirrorAddress(addr) ];
+    }
+    else {
+        uint16_t index = addr & 0x1F;
+        if ((index & 0x03) == 0) index &= 0x0F;  // mirrors of universal background
+        return palette[index];                   // (This local 'palette' is fine but note your PPU uses its own palette_RAM during rendering.)
+    }
+}
 
 
 

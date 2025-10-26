@@ -461,7 +461,7 @@ void PPU::render() {
 
 
 
-// Color pallete function to find which color to use
+// Color pallete function
 uint32_t PPU::nesColor(uint8_t idx) {
     static const uint32_t nesColors[64] = {
         0x666666,0x002A88,0x1412A7,0x3B00A4,0x5C007E,0x6E0040,0x6C0700,0x561D00,

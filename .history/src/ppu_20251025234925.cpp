@@ -373,86 +373,69 @@ void PPU::render() {
       uint8_t attr = OAM[i*4 + 2];
       uint8_t sprite_x = OAM[i*4 + 3];
 
-      // if current scanline or dot isn't inside sprite rectangle, skip
-      int sprite_y = (int)sprite_y_raw + 1; // Idk saw this on forum: Y is top-1
-      if ((y < sprite_y) || (y >= (sprite_y + spriteHeight))) {
-        continue;
-      }
-      if ((xdot < sprite_x) || (xdot >= (sprite_x + 8))) {
-        continue;
-      }
+      // Screen-space test
+      int sprite_y = (int)sprite_y_raw + 1;                 // NES quirk: Y is top-1
+      if (y < sprite_y || y >= sprite_y + spriteHeight) continue;
+      if (xdot < sprite_x || xdot >= sprite_x + 8) continue;
 
-      // calcualte the pixel in the sprite
+      // Pixel within sprite
       int col = xdot - sprite_x;
       int row = y - sprite_y;
       int px  = (attr & 0x40) ? (7 - col) : col; // horizontal flip
 
-      // Finding the pattern table address for sprite
+      // Select sprite pattern address
       uint16_t pattern_addr;
-
       if (spriteMode8x16) {
         uint16_t spr_base = (tile_index & 1) ? 0x1000 : 0x0000;
-        bool vertical_flip = (attr & 0x80) != 0;
-        bool topHalf;
-        uint8_t fineY;
+        bool     vflip    = (attr & 0x80) != 0;
 
-        // getting y pixel and top half based on if vertically flipped
-        if (!vertical_flip) { 
-          topHalf = (row < 8);
-          fineY = row & 7;
-        }
-        else {
-          topHalf = (row >= 8);
-          fineY = 7 - (row & 7);
-        }
+        bool     topHalf;
+        uint8_t  fineY;
+        if (!vflip) { topHalf = (row < 8);  fineY = row & 7; }
+        else        { topHalf = (row >= 8); fineY = 7 - (row & 7); }
 
         uint8_t  tileIndex = (tile_index & 0xFE) + (topHalf ? 0 : 1);
-        pattern_addr = spr_base + tileIndex * 16 + fineY;
-      } 
-      else { // if in 8x8 mode, then use same pattern table base in PPUCTRL bit 3
+        pattern_addr       = spr_base + (uint16_t)tileIndex * 16 + fineY;
+      } else {
         uint16_t spr_base = (control & 0x08) ? 0x1000 : 0x0000;
-        int fineY = (attr & 0x80) ? (7 - (row & 7)) : (row & 7);
-        pattern_addr = spr_base + tile_index * 16 + fineY;
+        int      fineY    = (attr & 0x80) ? (7 - (row & 7)) : (row & 7);
+        pattern_addr      = spr_base + (uint16_t)tile_index * 16 + fineY;
       }
 
-      // Get sprite bits
-      uint8_t s_low = mapper->read_ppu(pattern_addr & 0x1FFF);
-      uint8_t s_high = mapper->read_ppu((pattern_addr + 8) & 0x1FFF);
-      uint8_t sb0 = (s_low  >> (7 - px)) & 1;
-      uint8_t sb1 = (s_high >> (7 - px)) & 1;
-      uint8_t sprite_color_index = (sb1 << 1) | sb0;
+      // Fetch sprite bits
+      uint8_t slow   = mapper->read_ppu(pattern_addr & 0x1FFF);
+      uint8_t shigh  = mapper->read_ppu((pattern_addr + 8) & 0x1FFF);
+      uint8_t sb0    = (slow  >> (7 - px)) & 1;
+      uint8_t sb1    = (shigh >> (7 - px)) & 1;
+      uint8_t spr_ci = (sb1 << 1) | sb0;
 
-      // If we're in the left 8 most pixels, but the left sprite flag is off, don't draw sprite
+      // Left 8-pixel clipping for sprites
       bool spriteClipped = inLeft8 && !sprLeft;
 
-      // Sprite 0 hit logic. hit only if both pixels aren't transparent/opaque
+      // Sprite 0 hit logic (only if both non-transparent at this dot)
       if (i == 0 && visibleDot) {
         bool bgOpaqueForHit  = (background_color_index != 0);
-        bool sprOpaqueForHit = (sprite_color_index != 0) && !spriteClipped;
-        if (bgOpaqueForHit && sprOpaqueForHit) {
-          status |= PPUSTATUS_SPRITE0;
-        }
+        bool sprOpaqueForHit = (spr_ci != 0) && !spriteClipped;
+        if (bgOpaqueForHit && sprOpaqueForHit) status |= PPUSTATUS_SPRITE0;
       }
 
       // Transparent or clipped? Skip
-      if (sprite_color_index == 0 || spriteClipped) {
-        continue;
-      }
+      if (spr_ci == 0 || spriteClipped) continue;
 
       // Priority handling (behind background if attr & 0x20)
-      bool behind_bg = (attr & 0x20) != 0;
-      bool bg_transparent_here = (background_color_index == 0);
+      bool behind_bg            = (attr & 0x20) != 0;
+      bool bg_transparent_here  = (background_color_index == 0);
 
       if (!behind_bg || bg_transparent_here) {
         // Sprite palette fetch
-        uint16_t p_addr = 0x3F10 + ((attr & 0x03) << 2) + (sprite_color_index & 0x03);
-        uint16_t p_index  = (p_addr - 0x3F00) & 0x1F;
-        if ((p_index & 0x13) == 0x10) p_index &= ~0x10; // palette mirrors
-        uint8_t pal = palette_RAM[p_index] & 0x3F;
+        uint16_t paddr = 0x3F10 + ((attr & 0x03) << 2) + (spr_ci & 0x03);
+        uint16_t pidx  = (paddr - 0x3F00) & 0x1F;
+        if ((pidx & 0x13) == 0x10) pidx &= ~0x10; // palette mirrors
+        uint8_t pal = palette_RAM[pidx] & 0x3F;
 
         // Draw sprite pixel
         framebuffer[y * 256 + xdot] = nesColor(pal);
-        break; // next sprite
+        break; // next sprite (this pixel is resolved)
       }
     }
   }
@@ -461,7 +444,7 @@ void PPU::render() {
 
 
 
-// Color pallete function to find which color to use
+// Color pallete function
 uint32_t PPU::nesColor(uint8_t idx) {
     static const uint32_t nesColors[64] = {
         0x666666,0x002A88,0x1412A7,0x3B00A4,0x5C007E,0x6E0040,0x6C0700,0x561D00,

@@ -22,7 +22,7 @@ int main() {
     input = new Input();
 
     // Load ROM
-    cpu->loadROM("testing/super_mario_brothers.nes");
+    cpu->loadROM("testing/metroid.nes");
     if (!cpu->mapper) {
         fprintf(stderr, "CPU mapper is null. Mapper might not be implemented.\n");
     } 

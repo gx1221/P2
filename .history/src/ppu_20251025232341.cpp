@@ -284,175 +284,132 @@ void PPU::render() {
   }
 
   int y = scanline;
-   
-  bool sprEnabled = (mask & 0x10) != 0; // show sprites
-  bool sprLeft  = (mask & 0x04) != 0; // show sprites in leftmost 8 px
 
-  bool visibleDot = (scanline < 240) && (ppu_cycles >= 1 && ppu_cycles <= 256);
-  int  xdot = ppu_cycles - 1;
+  // PPUMASK flags
+  const bool sprEnabled = (mask & 0x10) != 0; // show sprites
+  const bool sprLeft    = (mask & 0x04) != 0; // show sprites in leftmost tile
 
-  bool bgEnabled = (mask & 0x08) != 0; // check ppu mask to see if background is enabled
-  bool bgLeft = (mask & 0x02) != 0; // check if background in leftmost 8 px is enabled
-  bool inLeft8 = (xdot < 8);
+  const bool visibleDot = (scanline < 240) && (ppu_cycles >= 1 && ppu_cycles <= 256);
 
-  // Decoding vram for every dot
-  uint8_t coarseY =  ((vram_addr >> 5)  & 0x1F); // Y tile_index coord
-  uint8_t name_table_XBit  =  ((vram_addr >> 10) & 1);
-  uint8_t name_table_YBit  =  ((vram_addr >> 11) & 1);
-  uint8_t fineY   =  ((vram_addr >> 12) & 7); // Y pixel coord in tile_index
+  const int xdot = ppu_cycles - 1;
 
-  // handling x coordiante
+  const bool bgEnabled  = (mask & 0x08) != 0;
+  const bool bgLeft     = (mask & 0x02) != 0;
+  const bool inLeft8    = (xdot < 8);
+
+  // Decode vram_addr for this dot
+  uint8_t coarseY =  ((vram_addr >> 5)  & 0x1F);
+  uint8_t ntXBit  =  ((vram_addr >> 10) & 1);
+  uint8_t ntYBit  =  ((vram_addr >> 11) & 1);
+  uint8_t fineY   =  ((vram_addr >> 12) & 7);
+
+  // Fixing an error with one tile offset
   uint8_t coarseX_base = (vram_addr & 0x1F);
-  uint8_t groupDot = (xdot & 7); // find where current pixel in tile_index is being rendered
-  uint8_t Tilepx = (this->x + groupDot);   // how many pixels into tile_index we are
-  uint8_t pxInTile = (Tilepx & 7);            // pixel with tile_index
-  uint8_t carryTile = (Tilepx >> 3);           // Check if new tile_index is crossed
+  uint8_t groupDot     = (xdot & 7);
+  uint8_t fxSum        = (this->x + groupDot);    
+  uint8_t pxInTile     = (fxSum & 7);             
+  uint8_t carryTile    = (fxSum >> 3);            
 
   uint8_t localCoarseX = ((coarseX_base + carryTile) & 31);
-  uint8_t pageX = (((coarseX_base + carryTile) >> 5) & 1);
-  uint8_t name_table_X = (name_table_XBit ^ pageX);
+  uint8_t pageX        = (((coarseX_base + carryTile) >> 5) & 1);
+  uint8_t ntX          = (ntXBit ^ pageX);
 
-  // Name table base and tile_index index
-  uint16_t base_nametable = 0x2000 + ((name_table_YBit << 1) | name_table_X) * 0x400;
-  uint16_t name_table_addr = base_nametable + (coarseY % 30) * 32 + localCoarseX;
-  uint8_t  tile_number = mapper->read_ppu(name_table_addr & 0x3FFF);
+  // name table and tile index with the carry applied
+  uint16_t base_nametable = 0x2000 + ((ntYBit << 1) | ntX) * 0x400;
+  uint16_t nt_addr        = base_nametable + (coarseY % 30) * 32 + localCoarseX;
+  uint8_t  tile_number    = mapper->read_ppu(nt_addr & 0x3FFF);
 
-  // Get Pattern and pixel select for background
+  // pattern fetch and pixel select
   uint16_t bg_pattern_base = (control & 0x10) ? 0x1000 : 0x0000;
-  uint16_t tile_addr = bg_pattern_base + (uint16_t)tile_number * 16 + (uint16_t)fineY;
-  
-  // get the 16 of tile_index in pattern table
-  uint8_t low = mapper->read_ppu(tile_addr & 0x1FFF);
-  uint8_t high = mapper->read_ppu((tile_addr + 8) & 0x1FFF);
+  uint16_t tile_addr       = bg_pattern_base + (uint16_t)tile_number * 16 + (uint16_t)fineY;
+  uint8_t  low             = mapper->read_ppu(tile_addr & 0x1FFF);
+  uint8_t  high            = mapper->read_ppu((tile_addr + 8) & 0x1FFF);
 
-  // getting color index bits and combining
   uint8_t bit0 = (low  >> (7 - pxInTile)) & 1;
   uint8_t bit1 = (high >> (7 - pxInTile)) & 1;
   uint8_t color_index = (bit1 << 1) | bit0;
 
-  // Attribute fetch
-  uint16_t attr_addr   = (base_nametable + 0x3C0)
-                      + (((coarseY % 30) / 4) * 8)
-                      + (localCoarseX / 4);
-  uint8_t  attr_byte   = mapper->read_ppu(attr_addr & 0x3FFF);
+    // Attribute from same nametable page
+  uint16_t attr_addr = (base_nametable + 0x3C0) + (((coarseY % 30) / 4) * 8) + (localCoarseX / 4);
+  uint8_t attr_byte = mapper->read_ppu(attr_addr & 0x3FFF);
 
-  // getting amount to shift attr_byte and finding which color pallete background tile_index is
   int shift = (((coarseY % 4) / 2) * 2 + ((localCoarseX % 4) / 2)) * 2;
   uint8_t palette_high_bits = (attr_byte >> shift) & 0x03;
 
-  // Apply left-8/bg enable mask to background pixel
-  uint8_t background_color_index = color_index;
-  if (!bgEnabled || (inLeft8 && !bgLeft)) {
-    background_color_index = 0;
-  }
+  // Left-8/bg enable affects effective BG pixel
+  uint8_t eff_bg_ci = color_index;
+  if (!bgEnabled || (inLeft8 && !bgLeft)) eff_bg_ci = 0;
 
-  // Background palette lookup and drawing
-  uint8_t bg_palette_byte;
-  if (background_color_index == 0){
-    // if color index is 0, then transparent
-    bg_palette_byte = palette_RAM[0];
-  }
-  else {
-    // else combine bits and pick color
-    bg_palette_byte = palette_RAM[((palette_high_bits << 2) | (background_color_index & 0x03)) & 0x1F];
-  }
+  uint8_t bg_pal_byte = (eff_bg_ci == 0)
+      ? palette_RAM[0]
+      : palette_RAM[((palette_high_bits << 2) | (eff_bg_ci & 0x03)) & 0x1F];
 
-  // update the current pixel with the color.
-  framebuffer[y * 256 + xdot] = nesColor(bg_palette_byte & 0x3F);
+  framebuffer[y * 256 + xdot] = nesColor(bg_pal_byte & 0x3F);
 
-  // SPRITES
+
+  // ---- SPRITES ----
   if (sprEnabled) {
+    bool spriteMode8x16 = (control & 0x20) != 0;
+  int  spriteHeight   = spriteMode8x16 ? 16 : 8;
 
-    bool spriteMode8x16 = (control & 0x20) != 0; // check if current sprite size is 8x8 or 8x16
-    int  spriteHeight   = spriteMode8x16 ? 16 : 8;
+  for (int i = 0; i < 64; ++i) {
+    uint8_t sy_raw = OAM[i*4 + 0];
+    uint8_t tile   = OAM[i*4 + 1];
+    uint8_t attr   = OAM[i*4 + 2];
+    uint8_t sx     = OAM[i*4 + 3];
 
-    for (int i = 0; i < 64; ++i) {
-      // OAM entry... find the y position, tile_index index, attribute, and x position
-      uint8_t sprite_y_raw = OAM[i*4 + 0];
-      uint8_t tile_index = OAM[i*4 + 1];
-      uint8_t attr = OAM[i*4 + 2];
-      uint8_t sprite_x = OAM[i*4 + 3];
+    int sy = (int)sy_raw + 1;
+    if (y < sy || y >= sy + spriteHeight) continue;
+    if (xdot < sx || xdot >= sx + 8) continue;      // <-- use xdot
 
-      // if current scanline or dot isn't inside sprite rectangle, skip
-      int sprite_y = (int)sprite_y_raw + 1; // Idk saw this on forum: Y is top-1
-      if ((y < sprite_y) || (y >= (sprite_y + spriteHeight))) {
-        continue;
-      }
-      if ((xdot < sprite_x) || (xdot >= (sprite_x + 8))) {
-        continue;
-      }
+    int col = xdot - sx;                             // <-- use xdot
+    int row = y - sy;
 
-      // calcualte the pixel in the sprite
-      int col = xdot - sprite_x;
-      int row = y - sprite_y;
-      int px  = (attr & 0x40) ? (7 - col) : col; // horizontal flip
+    int px = (attr & 0x40) ? (7 - col) : col;
 
-      // Finding the pattern table address for sprite
-      uint16_t pattern_addr;
+    uint16_t pattern_addr;
+    if (spriteMode8x16) {
+      uint16_t spr_base = (tile & 1) ? 0x1000 : 0x0000;
+      bool vflip = (attr & 0x80) != 0;
+      bool topHalf;
+      uint8_t fineY;
+      if (!vflip) { topHalf = (row < 8);  fineY = row & 7; }
+      else        { topHalf = (row >= 8); fineY = 7 - (row & 7); }
+      uint8_t tileIndex = (tile & 0xFE) + (topHalf ? 0 : 1);
+      pattern_addr = spr_base + (uint16_t)tileIndex * 16 + fineY;
+    } else {
+      uint16_t spr_base = (control & 0x08) ? 0x1000 : 0x0000;
+      int fineY = (attr & 0x80) ? (7 - (row & 7)) : (row & 7);
+      pattern_addr = spr_base + (uint16_t)tile * 16 + fineY;
+    }
 
-      if (spriteMode8x16) {
-        uint16_t spr_base = (tile_index & 1) ? 0x1000 : 0x0000;
-        bool vertical_flip = (attr & 0x80) != 0;
-        bool topHalf;
-        uint8_t fineY;
+    uint8_t slow  = mapper->read_ppu(pattern_addr & 0x1FFF);
+    uint8_t shigh = mapper->read_ppu((pattern_addr + 8) & 0x1FFF);
+    uint8_t sb0 = (slow  >> (7 - px)) & 1;
+    uint8_t sb1 = (shigh >> (7 - px)) & 1;
+    uint8_t spr_ci = (sb1 << 1) | sb0;
 
-        // getting y pixel and top half based on if vertically flipped
-        if (!vertical_flip) { 
-          topHalf = (row < 8);
-          fineY = row & 7;
-        }
-        else {
-          topHalf = (row >= 8);
-          fineY = 7 - (row & 7);
-        }
+    bool spriteClipped = inLeft8 && !sprLeft;
 
-        uint8_t  tileIndex = (tile_index & 0xFE) + (topHalf ? 0 : 1);
-        pattern_addr = spr_base + tileIndex * 16 + fineY;
-      } 
-      else { // if in 8x8 mode, then use same pattern table base in PPUCTRL bit 3
-        uint16_t spr_base = (control & 0x08) ? 0x1000 : 0x0000;
-        int fineY = (attr & 0x80) ? (7 - (row & 7)) : (row & 7);
-        pattern_addr = spr_base + tile_index * 16 + fineY;
-      }
+    if (i == 0 && visibleDot) {
+      bool bgOpaqueForHit  = (eff_bg_ci != 0);
+      bool sprOpaqueForHit = (spr_ci != 0) && !spriteClipped;
+      if (bgOpaqueForHit && sprOpaqueForHit) status |= PPUSTATUS_SPRITE0;
+    }
 
-      // Get sprite bits
-      uint8_t s_low = mapper->read_ppu(pattern_addr & 0x1FFF);
-      uint8_t s_high = mapper->read_ppu((pattern_addr + 8) & 0x1FFF);
-      uint8_t sb0 = (s_low  >> (7 - px)) & 1;
-      uint8_t sb1 = (s_high >> (7 - px)) & 1;
-      uint8_t sprite_color_index = (sb1 << 1) | sb0;
+    if (spr_ci == 0 || spriteClipped) continue;
 
-      // If we're in the left 8 most pixels, but the left sprite flag is off, don't draw sprite
-      bool spriteClipped = inLeft8 && !sprLeft;
+    bool behind_bg = (attr & 0x20) != 0;
+    bool bg_transparent_here = (eff_bg_ci == 0);
 
-      // Sprite 0 hit logic. hit only if both pixels aren't transparent/opaque
-      if (i == 0 && visibleDot) {
-        bool bgOpaqueForHit  = (background_color_index != 0);
-        bool sprOpaqueForHit = (sprite_color_index != 0) && !spriteClipped;
-        if (bgOpaqueForHit && sprOpaqueForHit) {
-          status |= PPUSTATUS_SPRITE0;
-        }
-      }
+    if (!behind_bg || bg_transparent_here) {
+      uint16_t paddr = 0x3F10 + ((attr & 0x03) << 2) + (spr_ci & 0x03);
+      uint16_t pidx  = (paddr - 0x3F00) & 0x1F;
+      if ((pidx & 0x13) == 0x10) pidx &= ~0x10;
+      uint8_t pal = palette_RAM[pidx] & 0x3F;
 
-      // Transparent or clipped? Skip
-      if (sprite_color_index == 0 || spriteClipped) {
-        continue;
-      }
-
-      // Priority handling (behind background if attr & 0x20)
-      bool behind_bg = (attr & 0x20) != 0;
-      bool bg_transparent_here = (background_color_index == 0);
-
-      if (!behind_bg || bg_transparent_here) {
-        // Sprite palette fetch
-        uint16_t p_addr = 0x3F10 + ((attr & 0x03) << 2) + (sprite_color_index & 0x03);
-        uint16_t p_index  = (p_addr - 0x3F00) & 0x1F;
-        if ((p_index & 0x13) == 0x10) p_index &= ~0x10; // palette mirrors
-        uint8_t pal = palette_RAM[p_index] & 0x3F;
-
-        // Draw sprite pixel
-        framebuffer[y * 256 + xdot] = nesColor(pal);
-        break; // next sprite
+      framebuffer[y * 256 + xdot] = nesColor(pal);  // <-- use xdot
+      break;
       }
     }
   }
@@ -461,7 +418,7 @@ void PPU::render() {
 
 
 
-// Color pallete function to find which color to use
+// Color pallete function
 uint32_t PPU::nesColor(uint8_t idx) {
     static const uint32_t nesColors[64] = {
         0x666666,0x002A88,0x1412A7,0x3B00A4,0x5C007E,0x6E0040,0x6C0700,0x561D00,

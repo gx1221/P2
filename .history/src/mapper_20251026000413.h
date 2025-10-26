@@ -38,7 +38,6 @@ private:
     std::vector<uint8_t> chrRAM; 
     std::vector<uint8_t> nametables;
 
-    // Registers and banks for MMC1 to get data from
     uint8_t shift_reg = 0x10;
     uint8_t write_count = 0;
     uint8_t control = 0x0C;

@@ -23,7 +23,7 @@
 #define FLAG_NEGATIVE  0x80
 
 
-class PPU; // forward declaration to connect classes
+class PPU; // forward declaration
 class Input;
 class CPU {
   public:

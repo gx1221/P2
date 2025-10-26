@@ -213,44 +213,45 @@ uint16_t Mapper0::mirrorAddress(uint16_t addr, bool verticalMirror) {
         }
     }
 
-    uint8_t Mapper1::read_ppu(uint16_t addr) {
-        addr &= 0x3FFF; // PPU address space mirrors every 0x4000
+uint8_t Mapper1::read_ppu(uint16_t addr) {
+    addr &= 0x3FFF; // Wrap PPU address space
 
-        if (addr < 0x2000) {
-            
-            uint8_t chr_mode = (control >> 4) & 1;
-            if (chrROM.empty()) {
-                return chrRAM[addr & 0x1FFF];
+    if (addr < 0x2000) {
+        uint8_t chr_mode = (control >> 4) & 1;
+
+        if (chrROM.empty()) {
+            // CHR RAM fallback
+            return chrRAM[addr & 0x1FFF];
+        } else {
+            if (chr_mode == 0) {
+                // 8 KB mode
+                uint32_t bank = (chr_bank0 & 0x1E); // Ignore bit 0
+                uint32_t bank_offset = bank * 0x1000; // 8 KB block (2 * 4 KB)
+                uint32_t index = (bank_offset + (addr & 0x1FFF)) % chrROM.size();
+                return chrROM[index];
             } else {
-                if (chr_mode == 0) {
-                    // 8 KB mode
-                    uint32_t bank_index = (chr_bank0 & 0x1E);
-                    uint32_t bank_offset = bank_index * 0x1000; // bank_index counts in 4KB units
-                    uint32_t idx = (bank_offset + (addr & 0x1FFF)) % chrROM.size();
-                    return chrROM[idx];
+                // 4 KB mode
+                if (addr < 0x1000) {
+                    uint32_t bank0 = chr_bank0 & 0x1F;
+                    uint32_t bank_offset0 = bank0 * 0x1000;
+                    uint32_t index0 = (bank_offset0 + (addr & 0x0FFF)) % chrROM.size();
+                    return chrROM[index0];
                 } else {
-                    // 4 KB mode
-                    if (addr < 0x1000) {
-                        uint32_t bank_offset = (uint32_t)(chr_bank0 & 0x1F) * 0x1000;
-                        uint32_t idx = (bank_offset + (addr & 0x0FFF)) % chrROM.size();
-                        return chrROM[idx];
-                    } else {
-                        uint32_t bank_offset = (uint32_t)(chr_bank1 & 0x1F) * 0x1000;
-                        uint32_t idx = (bank_offset + (addr & 0x0FFF)) % chrROM.size();
-                        return chrROM[idx];
-                    }
+                    uint32_t bank1 = chr_bank1 & 0x1F;
+                    uint32_t bank_offset1 = bank1 * 0x1000;
+                    uint32_t index1 = (bank_offset1 + (addr & 0x0FFF)) % chrROM.size();
+                    return chrROM[index1];
                 }
             }
         }
-        else if (addr < 0x3F00) {
-            return nametables[mirrorAddress(addr)];
-        }
-        else {
-            uint16_t index = addr & 0x1F;         
-            if ((index & 0x03) == 0) index &= 0x0F;
-            return palette[index];
-        }
+    } else if (addr < 0x3F00) {
+        return nametables[mirrorAddress(addr)];
+    } else {
+        uint16_t index = addr & 0x1F;
+        if ((index & 0x03) == 0) index &= 0x0F; // Mirror universal background
+        return palette[index];
     }
+}
 
 
 
