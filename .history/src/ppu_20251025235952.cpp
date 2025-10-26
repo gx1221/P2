@@ -429,30 +429,26 @@ void PPU::render() {
       if (i == 0 && visibleDot) {
         bool bgOpaqueForHit  = (background_color_index != 0);
         bool sprOpaqueForHit = (sprite_color_index != 0) && !spriteClipped;
-        if (bgOpaqueForHit && sprOpaqueForHit) {
-          status |= PPUSTATUS_SPRITE0;
-        }
+        if (bgOpaqueForHit && sprOpaqueForHit) status |= PPUSTATUS_SPRITE0;
       }
 
       // Transparent or clipped? Skip
-      if (sprite_color_index == 0 || spriteClipped) {
-        continue;
-      }
+      if (sprite_color_index == 0 || spriteClipped) continue;
 
       // Priority handling (behind background if attr & 0x20)
-      bool behind_bg = (attr & 0x20) != 0;
-      bool bg_transparent_here = (background_color_index == 0);
+      bool behind_bg            = (attr & 0x20) != 0;
+      bool bg_transparent_here  = (background_color_index == 0);
 
       if (!behind_bg || bg_transparent_here) {
         // Sprite palette fetch
-        uint16_t p_addr = 0x3F10 + ((attr & 0x03) << 2) + (sprite_color_index & 0x03);
-        uint16_t p_index  = (p_addr - 0x3F00) & 0x1F;
-        if ((p_index & 0x13) == 0x10) p_index &= ~0x10; // palette mirrors
-        uint8_t pal = palette_RAM[p_index] & 0x3F;
+        uint16_t paddr = 0x3F10 + ((attr & 0x03) << 2) + (sprite_color_index & 0x03);
+        uint16_t pidx  = (paddr - 0x3F00) & 0x1F;
+        if ((pidx & 0x13) == 0x10) pidx &= ~0x10; // palette mirrors
+        uint8_t pal = palette_RAM[pidx] & 0x3F;
 
         // Draw sprite pixel
         framebuffer[y * 256 + xdot] = nesColor(pal);
-        break; // next sprite
+        break; // next sprite (this pixel is resolved)
       }
     }
   }
@@ -461,7 +457,7 @@ void PPU::render() {
 
 
 
-// Color pallete function to find which color to use
+// Color pallete function
 uint32_t PPU::nesColor(uint8_t idx) {
     static const uint32_t nesColors[64] = {
         0x666666,0x002A88,0x1412A7,0x3B00A4,0x5C007E,0x6E0040,0x6C0700,0x561D00,

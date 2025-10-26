@@ -66,6 +66,12 @@ private:
     uint8_t  x = 0;  // fine X scroll or literally the x coordinate of current dot (3 bits)
     bool write_latch; // write latch
 
+    uint16_t bg_pattern_base_latched = 0; //base address of background pattern table
+    uint8_t  bg_tile_latched = 0; //tile index number
+    uint8_t  bg_attr_latched = 0; //attribute byte
+    uint8_t  bg_low_latched = 0; //low byte of tile pattern
+    uint8_t  bg_high_latched = 0; //high byte of tile pattern
+
 
 
   //Remember the pattern tables, name tables, and pallete_ram are all part of the Vram, but not OAM

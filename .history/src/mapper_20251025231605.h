@@ -33,12 +33,11 @@ class Mapper1 : public Mapper {
 private:
     std::vector<uint8_t> prgROM;
     std::vector<uint8_t> chrROM;
-    std::vector<uint8_t> palette;
+    std::vector<uint8_t> palette; // sprite palette for color
     std::vector<uint8_t> prgRAM;
     std::vector<uint8_t> chrRAM; 
     std::vector<uint8_t> nametables;
 
-    // Registers and banks for MMC1 to get data from
     uint8_t shift_reg = 0x10;
     uint8_t write_count = 0;
     uint8_t control = 0x0C;
@@ -60,6 +59,7 @@ private:
     uint16_t mirrorAddress(uint16_t addr);
 
 public:
+    // --- Public Interface ---
 
     // Constructor: Initializes the mapper with PRG/CHR data and the board's default mirroring.
     Mapper1(std::vector<uint8_t> prg, std::vector<uint8_t> chr, bool vertical);
